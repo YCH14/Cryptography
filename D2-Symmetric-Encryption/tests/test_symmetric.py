@@ -159,7 +159,7 @@ def out_dir(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def sample_file(plain_dir: Path) -> Path:
-    path = plain_dir / "informe_confidencial.pdf"
+    path = plain_dir / "confidential_report.pdf"
     path.write_bytes(b"%PDF-1.7\n" + os.urandom(4096) + b"\n%%EOF\n")
     return path
 
@@ -225,7 +225,7 @@ class TestRoundTrip:
         assert header["key_bits"] == 256
         assert header["nonce_bytes"] == 12
         assert header["tag_bytes"] == 16
-        assert header["filename"] == "informe_confidencial.pdf"
+        assert header["filename"] == "confidential_report.pdf"
         assert header["metadata"] == {"owner": "alice"}
         assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", header["created_at"])
 
@@ -436,7 +436,7 @@ def _set_metadata(key, value):
 
 
 HEADER_MUTATIONS = {
-    "rename_file": _set("filename", "inocente.txt"),
+    "rename_file": _set("filename", "innocent.txt"),
     "backdate_timestamp": _set("created_at", "1999-01-01T00:00:00Z"),
     "change_metadata_value": _set_metadata("owner", "mallory"),
     "inject_metadata_key": _set_metadata("admin", True),
