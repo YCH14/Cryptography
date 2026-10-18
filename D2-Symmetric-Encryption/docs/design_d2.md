@@ -1,291 +1,292 @@
-# D2 — Módulo de cifrado simétrico autenticado
+# D2 — Authenticated Symmetric Encryption Module
 
-**Proyecto:** Secure Digital Document Vault
-**Módulo:** [`vault/symmetric.py`](../vault/symmetric.py) · Excepciones: [`vault/exceptions.py`](../vault/exceptions.py) · Pruebas: [`tests/test_symmetric.py`](../tests/test_symmetric.py)
-**Rama:** `d2-symmetric-encryption`
-
----
-
-## 1. Objetivo
-
-Garantizar **confidencialidad**, **integridad** y **detección de manipulaciones** de los documentos de un único
-propietario mediante cifrado autenticado (AEAD) con *envelope encryption*.
-
-> **Objetivo de seguridad.** Un atacante que obtenga el contenedor cifrado no puede leer su contenido ni modificar
-> un solo bit de los datos **o de los metadatos** sin que el descifrado falle inmediatamente, de forma segura y
-> sin emitir datos parciales.
+**Project:** Secure Digital Document Vault
+**Module:** [`vault/symmetric.py`](../vault/symmetric.py) · Exceptions: [`vault/exceptions.py`](../vault/exceptions.py) · Tests: [`tests/test_symmetric.py`](../tests/test_symmetric.py)
+**Branch:** `d2-symmetric-encryption`
 
 ---
 
-## 2. Diseño
+## 1. Objective
 
-### 2.1 Primitivas y parámetros
+Guarantee the **confidentiality**, **integrity** and **tamper detection** of a single owner's documents using
+authenticated encryption (AEAD) with *envelope encryption*.
 
-| Parámetro | Valor | Comentario |
+> **Security goal.** An attacker who obtains the encrypted container cannot read its contents or modify a single bit
+> of the data **or the metadata** without decryption failing immediately, safely, and without emitting any partial
+> data.
+
+---
+
+## 2. Design
+
+### 2.1 Primitives and parameters
+
+| Parameter | Value | Comment |
 |---|---|---|
-| Biblioteca | `cryptography >= 44.0.0` (API AEAD de alto nivel) | Ninguna primitiva implementada a mano |
-| AEAD | **AES-256-GCM** (`AESGCM`) | Único algoritmo del vault; acelerado por hardware (AES-NI + PCLMULQDQ) |
-| Clave de usuario (KEK) | 256 bits (32 B) | Se rechaza cualquier otra longitud, incluso 128/192 bits que `AESGCM` aceptaría |
-| Clave de datos (DEK) | 256 bits, **nueva por archivo** | `os.urandom(32)` |
-| Nonce | 96 bits (12 B) | `os.urandom(12)`; tamaño recomendado por NIST SP 800-38D |
-| Tag | 128 bits (16 B) | Nunca truncado |
-| Fuente de aleatoriedad | CSPRNG del SO (`os.urandom` → `getrandom(2)`) | Prohibido `random`; verificado por prueba estática (AST) |
+| Library | `cryptography >= 44.0.0` (high-level AEAD API) | No hand-implemented primitives |
+| AEAD | **AES-256-GCM** (`AESGCM`) | The vault's only algorithm; hardware-accelerated (AES-NI + PCLMULQDQ) |
+| User key (KEK) | 256 bits (32 B) | Any other length is rejected, even the 128/192 bits that `AESGCM` would accept |
+| Data key (DEK) | 256 bits, **new per file** | `os.urandom(32)` |
+| Nonce | 96 bits (12 B) | `os.urandom(12)`; size recommended by NIST SP 800-38D |
+| Tag | 128 bits (16 B) | Never truncated |
+| Randomness source | OS CSPRNG (`os.urandom` → `getrandom(2)`) | `random` is forbidden; verified by a static (AST) test |
 
-El nombre del algoritmo queda registrado (y autenticado) en el encabezado. ChaCha20-Poly1305 se evaluó y se descartó:
-no hace falta, porque AES-GCM va acelerado por hardware en casi cualquier PC, y tener un solo algoritmo elimina
-opciones de configuración que podrían usarse mal.
+The algorithm name is recorded (and authenticated) in the header. ChaCha20-Poly1305 was evaluated and discarded:
+it is not needed, because AES-GCM is hardware-accelerated on almost any PC, and having a single algorithm removes
+configuration options that could be misused.
 
 ### 2.2 Envelope encryption
 
 ```mermaid
 flowchart LR
-    KEK["KEK del propietario (32 B)"] --> W["AEAD.encrypt(wrap_nonce, DEK, AAD_wrap)"]
-    RNG1["os.urandom(32)"] --> DEK["DEK (32 B, un solo uso)"]
+    KEK["Owner KEK (32 B)"] --> W["AEAD.encrypt(wrap_nonce, DEK, AAD_wrap)"]
+    RNG1["os.urandom(32)"] --> DEK["DEK (32 B, single use)"]
     DEK --> W
-    W --> WD["Wrapped DEK (48 B = 32 + tag 16)"]
-    DEK --> P["AEAD.encrypt(payload_nonce, documento, AAD_payload)"]
-    DOC["Documento en claro"] --> P
+    W --> WD["Wrapped DEK (48 B = 32 + 16 tag)"]
+    DEK --> P["AEAD.encrypt(payload_nonce, document, AAD_payload)"]
+    DOC["Plaintext document"] --> P
     P --> CT["Ciphertext || Tag"]
-    H["Encabezado JSON canónico"] --> W
+    H["Canonical JSON header"] --> W
     H --> P
 ```
 
-Ventajas: (1) la KEK sólo cifra 32 bytes por archivo, lo que mantiene muy bajo su número de usos; (2) la rotación
-de la KEK sólo requiere re-envolver las DEK, no re-cifrar los documentos; (3) cada documento tiene una clave
-independiente, de modo que el compromiso de una DEK no afecta a los demás.
+Advantages: (1) the KEK only encrypts 32 bytes per file, which keeps its number of uses very low; (2) rotating the
+KEK only requires re-wrapping the DEKs, not re-encrypting the documents; (3) every document has an independent key,
+so compromising one DEK does not affect the others.
 
-### 2.3 Ciclo de vida del nonce
+### 2.3 Nonce lifecycle
 
-| Nonce | Clave bajo la que se usa | Generación | Unicidad |
+| Nonce | Key it is used under | Generation | Uniqueness |
 |---|---|---|---|
-| `payload_nonce` | DEK del archivo | `os.urandom(12)` | **Absoluta por construcción:** la DEK es nueva y se usa para exactamente un cifrado, por lo que el par *(clave, nonce)* jamás se repite. |
-| `wrap_nonce` | KEK del propietario | `os.urandom(12)` | Probabilística: la probabilidad de colisión tras *q* envoltorios es ≈ *q*² / 2⁹⁷. Con el límite de NIST (2³² invocaciones por clave con nonces aleatorios) la probabilidad es ≤ 2⁻³³. Un único propietario no se acerca a ese volumen. |
+| `payload_nonce` | The file's DEK | `os.urandom(12)` | **Absolute by construction:** the DEK is new and is used for exactly one encryption, so the *(key, nonce)* pair can never repeat. |
+| `wrap_nonce` | The owner's KEK | `os.urandom(12)` | Probabilistic: the collision probability after *q* wraps is ≈ *q*² / 2⁹⁷. At the NIST limit (2³² invocations per key with random nonces) the probability is ≤ 2⁻³³. A single owner never gets near that volume. |
 
-Reglas aplicadas:
+Rules applied:
 
-1. Los nonces se generan **inmediatamente antes** de cada operación y se escriben en el contenedor; nunca se derivan
-   del tiempo, de contadores en memoria ni de semillas.
-2. Nunca se reutiliza un nonce: re-cifrar el mismo archivo produce DEK, nonces, DEK envuelta, ciphertext y tag nuevos
-   (prueba `TestUniqueness`).
-3. En descifrado, los nonces se leen del contenedor y además forman parte del AAD del payload.
-4. La DEK se descarta (`del`) tras su uso. CPython no permite borrar memoria de forma garantizada (ver §3.3).
+1. Nonces are generated **immediately before** each operation and written into the container; they are never derived
+   from time, in-memory counters or seeds.
+2. A nonce is never reused: re-encrypting the same file produces a new DEK, nonces, wrapped DEK, ciphertext and tag
+   (`TestUniqueness` test).
+3. On decryption, the nonces are read from the container and also form part of the payload's AAD.
+4. The DEK is discarded (`del`) after use. CPython does not allow memory to be erased with any guarantee (see §3.3).
 
-### 2.4 Formato del contenedor
+### 2.4 Container format
 
-Enteros en *big-endian*. `N` = longitud del encabezado, `M` = longitud del documento (GCM preserva la longitud).
+Integers are *big-endian*. `N` = header length, `M` = document length (GCM preserves length).
 
-| Offset | Tamaño | Campo | Protección |
+| Offset | Size | Field | Protection |
 |---|---|---|---|
-| 0 | 4 B | Magic `SDDV` | AAD de ambos AEAD |
-| 4 | 4 B | Longitud del encabezado `N` (`uint32`) | AAD de ambos AEAD |
-| 8 | N B | Encabezado JSON canónico (en claro) | AAD de ambos AEAD |
-| 8+N | 12 B | Wrap nonce | Entrada del AEAD de la DEK + AAD del payload |
-| 20+N | 48 B | DEK envuelta (32 B cifrados + tag 16 B) | Tag propio + AAD del payload |
-| 68+N | 12 B | Payload nonce | Entrada del AEAD del payload + AAD del payload |
-| 80+N | M B | Ciphertext | Tag del payload |
+| 0 | 4 B | Magic `SDDV` | AAD of both AEADs |
+| 4 | 4 B | Header length `N` (`uint32`) | AAD of both AEADs |
+| 8 | N B | Canonical JSON header (in clear) | AAD of both AEADs |
+| 8+N | 12 B | Wrap nonce | Input of the DEK's AEAD + payload AAD |
+| 20+N | 48 B | Wrapped DEK (32 B encrypted + 16 B tag) | Its own tag + payload AAD |
+| 68+N | 12 B | Payload nonce | Input of the payload's AEAD + payload AAD |
+| 80+N | M B | Ciphertext | Payload tag |
 | 80+N+M | 16 B | Tag | — |
 
-Tamaño total = `96 + N + M` bytes.
+Total size = `96 + N + M` bytes.
 
-**Vinculación (AAD):**
+**Binding (AAD):**
 
 ```text
 AAD_wrap    = magic ‖ len ‖ header
 AAD_payload = magic ‖ len ‖ header ‖ wrap_nonce ‖ wrapped_dek ‖ payload_nonce
 ```
 
-`AAD_payload` es exactamente todo lo que precede al ciphertext, de modo que **cada byte del contenedor está cubierto
-por al menos un tag**. La prueba `test_exhaustive_every_bit_of_container_is_authenticated` invierte cada uno de los
-bits de un contenedor y comprueba que todas las variantes son rechazadas. Además, `AAD_wrap` liga la DEK envuelta a
-*su* encabezado: no se puede trasplantar una DEK envuelta (ni un encabezado) entre contenedores.
+`AAD_payload` is exactly everything that precedes the ciphertext, so **every byte of the container is covered by at
+least one tag**. The test `test_exhaustive_every_bit_of_container_is_authenticated` flips every single bit of a
+container and checks that all variants are rejected. In addition, `AAD_wrap` binds the wrapped DEK to *its own*
+header: a wrapped DEK (or a header) cannot be transplanted between containers.
 
-### 2.5 Encabezado (metadatos autenticados)
+### 2.5 Header (authenticated metadata)
 
-Ejemplo real (los metadatos viajan **en claro**; aquí con `include_filename=True`):
+Real example (the metadata travels **in clear**; here with `include_filename=True`):
 
 ```json
 {"alg":"AES-256-GCM","created_at":"2026-10-14T16:32:37Z","filename":"doc.pdf","key_bits":256,"key_wrap":"AES-256-GCM","metadata":{"owner":"alice"},"nonce_bytes":12,"tag_bytes":16,"version":1}
 ```
 
-| Campo | Obligatorio | Descripción |
+| Field | Required | Description |
 |---|---|---|
-| `version` | Sí | Versión del formato (`1`) |
-| `alg` / `key_wrap` | Sí | AEAD del payload y del envoltorio de la DEK (siempre `AES-256-GCM`; cualquier otro valor se rechaza) |
-| `key_bits`, `nonce_bytes`, `tag_bytes` | Sí | Parámetros criptográficos (`256`, `12`, `16`) |
-| `created_at` | Sí | Timestamp UTC ISO-8601 (`YYYY-MM-DDTHH:MM:SSZ`) |
-| `filename` | No | Nombre original; sólo se guarda con `include_filename=True` (desactivado por defecto) |
-| `metadata` | No | Diccionario JSON del usuario |
+| `version` | Yes | Format version (`1`) |
+| `alg` / `key_wrap` | Yes | AEAD of the payload and of the DEK wrap (always `AES-256-GCM`; any other value is rejected) |
+| `key_bits`, `nonce_bytes`, `tag_bytes` | Yes | Cryptographic parameters (`256`, `12`, `16`) |
+| `created_at` | Yes | ISO-8601 UTC timestamp (`YYYY-MM-DDTHH:MM:SSZ`) |
+| `filename` | No | Original name; only stored with `include_filename=True` (disabled by default) |
+| `metadata` | No | User-supplied JSON dictionary |
 
-**Serialización canónica:** claves ordenadas, sin espacios (`separators=(",", ":")`), sólo ASCII
-(`ensure_ascii=True`), sin `NaN`/`Infinity`. Al cifrar se exige además un *round-trip* exacto (rechaza tuplas, claves
-no `str`, referencias circulares). Tamaño máximo: 64 KiB.
+**Canonical serialization:** sorted keys, no whitespace (`separators=(",", ":")`), ASCII only
+(`ensure_ascii=True`), no `NaN`/`Infinity`. When encrypting, an exact *round-trip* is also required (rejects tuples,
+non-`str` keys and circular references). Maximum size: 64 KiB.
 
-**Parseo estricto al descifrar** (antes de autenticar, se trata como dato hostil): ASCII estricto, JSON sin claves
-duplicadas ni constantes no finitas, re-serialización canónica idéntica byte a byte, campos exactos (sin desconocidos),
-tipos exactos (`True` no se acepta como `1`) y parámetros con los únicos valores admitidos (AES-256-GCM, 256 bits, 12 B, 16 B). Aunque los bytes crudos ya están
-autenticados, esto elimina ataques de *parser differential* y de *downgrade* de algoritmo. El encabezado sólo se
-devuelve al llamador **después** de verificar ambos tags.
+**Strict parsing on decryption** (before authenticating, the header is treated as hostile data): strict ASCII, JSON
+with no duplicate keys or non-finite constants, a canonical re-serialization identical byte for byte, exact fields
+(no unknown ones), exact types (`True` is not accepted as `1`) and parameters with only the permitted values
+(AES-256-GCM, 256 bits, 12 B, 16 B). Even though the raw bytes are already authenticated, this eliminates *parser
+differential* attacks and algorithm *downgrade* attacks. The header is only returned to the caller **after** both
+tags have been verified.
 
 > [!NOTE]
-> La canonicalización es determinista y estricta, inspirada en RFC 8785 (JCS), pero no lo implementa al 100 %
-> (orden de claves por *code point* y formato de flotantes de Python). No afecta a la seguridad porque se autentican
-> los bytes exactos que viajan en el contenedor.
+> The canonicalization is deterministic and strict, inspired by RFC 8785 (JCS), but does not implement it 100%
+> (key ordering by *code point* and Python's float formatting). This does not affect security because the exact
+> bytes that travel in the container are what gets authenticated.
 
-### 2.6 Flujos
+### 2.6 Flows
 
 ```mermaid
 sequenceDiagram
-    participant U as Llamador
+    participant U as Caller
     participant S as vault.symmetric
-    participant D as Disco
+    participant D as Disk
     U->>S: encrypt_file(path, KEK, out, metadata)
-    S->>S: validar KEK (32 B), out inexistente
-    S->>D: leer documento (límite de tamaño)
-    S->>S: header canónico, DEK y nonces con os.urandom
-    S->>S: wrap DEK con KEK (AAD_wrap) y cifrar payload con DEK (AAD_payload)
-    S->>D: crear out con O_CREAT|O_EXCL, modo 0600, fsync
+    S->>S: validate KEK (32 B), out does not exist
+    S->>D: read document (size limit)
+    S->>S: canonical header, DEK and nonces via os.urandom
+    S->>S: wrap DEK with KEK (AAD_wrap) and encrypt payload with DEK (AAD_payload)
+    S->>D: create out with O_CREAT|O_EXCL, mode 0600, fsync
     U->>S: decrypt_file(vault, KEK, out)
-    S->>S: validar KEK, out inexistente
-    S->>D: leer contenedor (límite de tamaño)
-    S->>S: parseo estricto, unwrap DEK, verificar tag del payload, todo en memoria
-    alt cualquier fallo
-        S-->>U: DecryptionFailedError (no se toca el disco)
-    else éxito
-        S->>D: crear out con O_EXCL, 0600, fsync
+    S->>S: validate KEK, out does not exist
+    S->>D: read container (size limit)
+    S->>S: strict parsing, unwrap DEK, verify payload tag, all in memory
+    alt any failure
+        S-->>U: DecryptionFailedError (disk untouched)
+    else success
+        S->>D: create out with O_EXCL, 0600, fsync
         S-->>U: Path(out)
     end
 ```
 
-### 2.7 Manejo de errores y del disco
+### 2.7 Error and disk handling
 
-* **Una sola excepción, un solo mensaje:** cualquier fallo al abrir un contenedor (clave errónea, tag inválido,
-  bit modificado en datos o metadatos, truncado, JSON inválido, versión/algoritmo no soportado) produce
+* **One exception, one message:** any failure when opening a container (wrong key, invalid tag, modified bit in the
+  data or metadata, truncation, invalid JSON, unsupported version/algorithm) produces
   `DecryptionFailedError("Decryption failed: the container is invalid, has been tampered with, or the key is incorrect.")`.
-* **Sin encadenamiento:** la excepción se lanza *fuera* del bloque `except`, de modo que `__cause__` y `__context__`
-  son `None`; un traceback no revela si falló el parseo, el desenvolvimiento de la DEK o el tag del payload.
-* **Errores del llamador** (no controlables por un atacante) son descriptivos: `InvalidKeyError`,
-  `InvalidMetadataError`, `PlaintextTooLargeError` (todas `VaultError` + `ValueError`).
-* **Verificar antes de escribir:** el descifrado completo ocurre en memoria con la API *one-shot* de `cryptography`,
-  que no devuelve texto plano si el tag no verifica. El archivo de salida se crea **sólo tras el éxito**.
-* **Sin archivos temporales ni residuos:** la salida se crea con `O_CREAT | O_EXCL` (no sigue ni sobrescribe
-  archivos o *symlinks* existentes), permisos `0600` y `fsync`. Si la escritura falla a mitad (p. ej. `ENOSPC`), el
-  archivo parcial se elimina antes de propagar el `OSError`.
-* **Nunca se sobrescribe** un archivo existente (`FileExistsError`).
-* **Nombre de salida decidido por el llamador:** el `filename` del encabezado nunca se usa como ruta, lo que evita
+* **No chaining:** the exception is raised *outside* the `except` block, so `__cause__` and `__context__` are
+  `None`; a traceback does not reveal whether parsing, DEK unwrapping or the payload tag failed.
+* **Caller errors** (not attacker-controllable) are descriptive: `InvalidKeyError`, `InvalidMetadataError`,
+  `PlaintextTooLargeError` (all `VaultError` + `ValueError`).
+* **Verify before writing:** the full decryption happens in memory using the *one-shot* API of `cryptography`,
+  which returns no plaintext if the tag does not verify. The output file is created **only after success**.
+* **No temporary files or leftovers:** the output is created with `O_CREAT | O_EXCL` (it neither follows nor
+  overwrites existing files or *symlinks*), permissions `0600` and `fsync`. If the write fails midway (e.g.
+  `ENOSPC`), the partial file is removed before the `OSError` is propagated.
+* **Never overwrites** an existing file (`FileExistsError`).
+* **Output name chosen by the caller:** the header's `filename` is never used as a path, which prevents
   *path traversal*.
 
-### 2.8 API pública
+### 2.8 Public API
 
 ```python
 encrypt_file(file_path: Path, owner_key: bytes, output_path: Path,
              metadata: Optional[dict] = None, *, include_filename=False) -> Path
 decrypt_file(vault_file_path: Path, owner_key: bytes, output_path: Path) -> Path
 
-# Variantes en memoria, reutilizables por entregables posteriores
+# In-memory variants, reusable by later deliverables
 encrypt_bytes(plaintext, owner_key, *, metadata=None, filename=None) -> bytes
 decrypt_bytes(container, owner_key) -> DecryptedDocument(plaintext, header)
-generate_owner_key() -> bytes   # 32 B del CSPRNG del SO
+generate_owner_key() -> bytes   # 32 B from the OS CSPRNG
 ```
 
 ---
 
-## 3. Justificación de seguridad
+## 3. Security rationale
 
-### 3.1 ¿Por qué AEAD y no «cifrado + hash» (p. ej. AES-CBC + SHA-256)?
+### 3.1 Why AEAD and not "encryption + hash" (e.g. AES-CBC + SHA-256)?
 
-1. **Un hash no es un autenticador.** `SHA-256(ciphertext)` no usa clave: un atacante modifica el ciphertext y
-   recalcula el hash. Haría falta un **MAC con clave** (HMAC), una segunda clave independiente y una comparación en
-   tiempo constante.
-2. **El orden importa y es fácil equivocarse.** Sólo *Encrypt-then-MAC* es genéricamente seguro. *MAC-then-Encrypt*
-   con CBC ha producido ataques reales de *padding oracle* (Vaudenay 2002, Lucky 13, POODLE), que recuperan el
-   texto plano byte a byte a partir de errores o tiempos distintos.
-3. **Hay que acordarse de autenticar todo:** IV, metadatos, algoritmo y longitudes. Olvidar el IV o los metadatos en
-   el MAC permite manipulaciones (p. ej. alterar el primer bloque CBC modificando el IV).
-4. **CBC requiere *padding*** y un IV impredecible; GCM no tiene padding, lo que elimina por
-   completo la clase de ataques de padding oracle.
-5. **AEAD es una primitiva estándar y analizada** (IND-CCA2 + INT-CTXT) que entrega confidencialidad, integridad y
-   **datos asociados (AAD)** en una sola llamada, con una API que *verifica antes de devolver* el texto plano. Menos
-   piezas = menos superficie de error de implementación. Además AES-GCM es más rápido que CBC + HMAC en hardware
-   moderno.
+1. **A hash is not an authenticator.** `SHA-256(ciphertext)` uses no key: an attacker modifies the ciphertext and
+   recomputes the hash. A **keyed MAC** (HMAC) would be needed, plus a second independent key and a constant-time
+   comparison.
+2. **Order matters and it is easy to get wrong.** Only *Encrypt-then-MAC* is generically secure. *MAC-then-Encrypt*
+   with CBC has produced real *padding oracle* attacks (Vaudenay 2002, Lucky 13, POODLE), which recover the
+   plaintext byte by byte from differing errors or timings.
+3. **You have to remember to authenticate everything:** the IV, metadata, algorithm and lengths. Leaving the IV or
+   the metadata out of the MAC allows manipulation (e.g. altering the first CBC block by modifying the IV).
+4. **CBC requires *padding*** and an unpredictable IV; GCM has no padding, which entirely eliminates the class of
+   padding oracle attacks.
+5. **AEAD is a standard, well-analysed primitive** (IND-CCA2 + INT-CTXT) that delivers confidentiality, integrity
+   and **associated data (AAD)** in a single call, with an API that *verifies before returning* the plaintext.
+   Fewer moving parts = less implementation-error surface. AES-GCM is also faster than CBC + HMAC on modern
+   hardware.
 
-### 3.2 Consecuencias catastróficas de reutilizar un nonce en GCM
+### 3.2 Catastrophic consequences of nonce reuse in GCM
 
-GCM = cifrado CTR + autenticador GHASH con clave `H = AES_K(0¹²⁸)`. Si se cifran dos mensajes con la misma clave y
-el mismo nonce:
+GCM = CTR encryption + a GHASH authenticator with key `H = AES_K(0¹²⁸)`. If two messages are encrypted under the
+same key and the same nonce:
 
-1. **Pérdida de confidencialidad:** el *keystream* CTR se repite, así que `C₁ ⊕ C₂ = P₁ ⊕ P₂`. Conocer o adivinar
-   parte de un documento (cabeceras PDF, plantillas) revela la parte correspondiente del otro.
-2. **Pérdida total de autenticidad (*forbidden attack*, Joux 2006; Böck et al. 2016):** los dos tags dan un sistema
-   polinómico sobre GF(2¹²⁸) cuya raíz es `H`. Recuperado `H` (y la máscara del tag), el atacante puede **falsificar
-   tags válidos para mensajes arbitrarios** bajo esa clave y nonce, y modificar ciphertexts a voluntad sin ser
-   detectado. La integridad deja de existir.
-3. **Contagio vía KEK:** en nuestro esquema, una colisión de `wrap_nonce` bajo la KEK revelaría `DEK₁ ⊕ DEK₂` y la
-   clave GHASH del envoltorio, permitiendo forjar DEK envueltas.
+1. **Loss of confidentiality:** the CTR *keystream* repeats, so `C₁ ⊕ C₂ = P₁ ⊕ P₂`. Knowing or guessing part of one
+   document (PDF headers, templates) reveals the corresponding part of the other.
+2. **Total loss of authenticity (*forbidden attack*, Joux 2006; Böck et al. 2016):** the two tags give a polynomial
+   system over GF(2¹²⁸) whose root is `H`. Once `H` (and the tag mask) is recovered, the attacker can **forge valid
+   tags for arbitrary messages** under that key and nonce, and modify ciphertexts at will without detection.
+   Integrity ceases to exist.
+3. **Contagion via the KEK:** in our scheme, a `wrap_nonce` collision under the KEK would reveal `DEK₁ ⊕ DEK₂` and
+   the wrap's GHASH key, allowing wrapped DEKs to be forged.
 
-**Mitigaciones en este diseño:** DEK nueva por archivo (el nonce del payload es único por construcción); nonces de
-96 bits del CSPRNG del SO; la KEK sólo envuelve 32 B por archivo, muy por debajo del límite de 2³² invocaciones;
-prueba automatizada de unicidad sobre 300 cifrados y prueba que verifica que **toda** la aleatoriedad proviene de
-`os.urandom` (exactamente 32 + 12 + 12 bytes por archivo).
+**Mitigations in this design:** a new DEK per file (the payload nonce is unique by construction); 96-bit nonces
+from the OS CSPRNG; the KEK only wraps 32 B per file, far below the 2³² invocation limit; an automated uniqueness
+test over 300 encryptions and a test that verifies that **all** randomness comes from `os.urandom` (exactly
+32 + 12 + 12 bytes per file).
 
-### 3.3 Modelo de amenazas
+### 3.3 Threat model
 
-**Activos:** contenido de los documentos (confidencialidad + integridad) y metadatos del encabezado (integridad).
+**Assets:** document contents (confidentiality + integrity) and header metadata (integrity).
 
-**Atacante considerado:** controla el almacenamiento o el canal donde reside el contenedor (disco robado, nube,
-backup, red). Puede **leer, copiar, modificar, truncar, extender, reordenar y trasplantar** bytes o contenedores
-completos; conoce el formato y el código; puede obtener contenedores de textos que él elija. **No** conoce la KEK
-ni controla el equipo del propietario.
+**Attacker considered:** controls the storage or channel where the container resides (stolen disk, cloud, backup,
+network). They can **read, copy, modify, truncate, extend, reorder and transplant** bytes or entire containers;
+they know the format and the code; they can obtain containers of plaintexts of their choosing. They do **not** know
+the KEK and do not control the owner's machine.
 
-| Ataque | Defensa |
+| Attack | Defense |
 |---|---|
-| Leer el documento | AES-256-GCM con DEK de 256 bits |
-| Modificar ciphertext, tag o nonces | Fallo del tag → `DecryptionFailedError` |
-| Modificar metadatos (nombre, fecha, algoritmo, versión) | Encabezado ligado como AAD a ambos AEAD |
-| *Downgrade* de algoritmo/parámetros | Un solo algoritmo admitido + parámetros autenticados |
-| Trasplantar DEK envuelta / encabezado entre contenedores | `AAD_wrap` y `AAD_payload` |
-| Truncar / añadir bytes | Longitudes autenticadas + tag final |
-| Oráculo de errores / padding oracle | Error único sin encadenar; AEAD sin padding |
-| Fuerza bruta de clave | Espacio de 2²⁵⁶ |
-| Sobrescritura / *symlink* en la ruta de salida | `O_EXCL`, rechazo de rutas existentes |
+| Reading the document | AES-256-GCM with a 256-bit DEK |
+| Modifying ciphertext, tag or nonces | Tag failure → `DecryptionFailedError` |
+| Modifying metadata (name, date, algorithm, version) | Header bound as AAD to both AEADs |
+| Algorithm/parameter *downgrade* | Only one supported algorithm + authenticated parameters |
+| Transplanting wrapped DEK / header between containers | `AAD_wrap` and `AAD_payload` |
+| Truncating / appending bytes | Authenticated lengths + final tag |
+| Error oracle / padding oracle | Single unchained error; AEAD without padding |
+| Key brute force | 2²⁵⁶ search space |
+| Overwrite / *symlink* on the output path | `O_EXCL`, rejection of existing paths |
 
-**Fuera de alcance en esta fase (riesgos aceptados):**
+**Out of scope in this phase (accepted risks):**
 
-* **Replay / rollback:** una versión **antigua pero válida** de un contenedor se descifra correctamente; no hay
-  noción de frescura. *Mitigación futura:* manifiesto autenticado con versión monotónica por documento.
-* **Sustitución de documentos completos** del mismo propietario (intercambiar `a.vault` por `b.vault`): ambos son
-  auténticos. La aplicación puede comparar el `filename` autenticado con el esperado; un identificador de documento
-  ligado al índice del vault se abordará después.
-* **Eliminación** de contenedores (disponibilidad / DoS).
-* **Confidencialidad de metadatos y del tamaño:** el encabezado va en claro y la longitud del ciphertext revela el
-  tamaño exacto. El nombre del archivo no se guarda salvo que se active `include_filename=True`; no poner secretos en `metadata`.
-* **Gestión de la KEK:** generación, almacenamiento y derivación desde contraseña (Argon2id/scrypt) corresponden a
-  un entregable posterior.
-* **Compromiso del equipo:** malware, depuradores, volcados de memoria, *swap*, ataques *cold boot*. CPython no
-  garantiza el borrado de claves en memoria (objetos `bytes` inmutables).
-* **Borrado seguro en disco:** al eliminar un archivo parcial tras un fallo de E/S, los bloques físicos pueden
-  persistir (journaling, *wear leveling* en SSD). Recomendado: cifrado de disco completo.
-* **Canales laterales locales** de tiempo/caché (dependemos de la implementación constante de OpenSSL). El tiempo de
-  fallo distingue «falla en el envoltorio» de «falla en el payload», pero eso no da ventaja: el atacante ya sabe qué
-  bytes alteró y GCM no tiene padding que filtrar.
-* **Key commitment:** GCM no es *key-committing* (ataques tipo *invisible salamanders*). Con un único
-  propietario y una única KEK el riesgo es bajo; será relevante cuando haya varios destinatarios.
-* **Multiusuario, firmas y no repudio:** fuera del alcance de D2.
+* **Replay / rollback:** an **old but valid** version of a container decrypts correctly; there is no notion of
+  freshness. *Future mitigation:* an authenticated manifest with a per-document monotonic version.
+* **Substitution of whole documents** of the same owner (swapping `a.vault` for `b.vault`): both are authentic. The
+  application can compare the authenticated `filename` with the expected one; a document identifier bound to the
+  vault index will be addressed later.
+* **Deletion** of containers (availability / DoS).
+* **Confidentiality of metadata and size:** the header is in clear and the ciphertext length reveals the exact
+  size. The file name is not stored unless `include_filename=True` is enabled; do not put secrets in `metadata`.
+* **KEK management:** generation, storage and password-based derivation (Argon2id/scrypt) belong to a later
+  deliverable.
+* **Compromise of the machine:** malware, debuggers, memory dumps, *swap*, *cold boot* attacks. CPython does not
+  guarantee erasure of keys in memory (immutable `bytes` objects).
+* **Secure erasure on disk:** when deleting a partial file after an I/O failure, the physical blocks may persist
+  (journaling, SSD *wear leveling*). Recommended: full-disk encryption.
+* **Local timing/cache side channels** (we rely on OpenSSL's constant-time implementation). Failure timing
+  distinguishes "fails in the wrap" from "fails in the payload", but that gives no advantage: the attacker already
+  knows which bytes they altered and GCM has no padding to leak.
+* **Key commitment:** GCM is not *key-committing* (*invisible salamanders*-type attacks). With a single owner and a
+  single KEK the risk is low; it will become relevant when there are multiple recipients.
+* **Multi-user, signatures and non-repudiation:** outside the scope of D2.
 
 ---
 
-## 4. Trazabilidad de pruebas
+## 4. Test traceability
 
-| Requisito | Pruebas (`tests/test_symmetric.py`) |
+| Requirement | Tests (`tests/test_symmetric.py`) |
 |---|---|
-| 1. Ciclo completo byte a byte | `TestRoundTrip::test_file_roundtrip_is_byte_identical` (0 B a 1 MiB), layout, encabezado canónico, Unicode |
-| 2. Clave incorrecta sin archivo | `TestWrongKey` (clave aleatoria, a 1 bit de distancia, longitudes/tipos inválidos) |
-| 3. Ciphertext manipulado | `TestCiphertextTampering` (bit aleatorio ×25, cada región, **todos los bits del contenedor**, truncado, extendido, trasplantes) |
-| 4. Metadatos manipulados | `TestMetadataTampering` (13 mutaciones semánticas, cada byte del encabezado, JSON no canónico, claves duplicadas, longitud) |
-| 5. Unicidad de salida | `TestUniqueness` (nonces, DEK envueltas, ciphertexts y tags distintos; 300 cifrados; sólo `os.urandom`; sin `random`) |
-| 6. Fallos en disco | `TestDiskSafety` (sin salida ni residuos tras fallos, no sobrescribe, rechaza *symlinks*, `ENOSPC` simulado borra el parcial) |
-| Sin oráculos | `TestErrorHygiene` (mismo tipo y mensaje en 8 modos de fallo; sin `__cause__`/`__context__`) |
+| 1. Full byte-for-byte cycle | `TestRoundTrip::test_file_roundtrip_is_byte_identical` (0 B to 1 MiB), layout, canonical header, Unicode |
+| 2. Wrong key without a file | `TestWrongKey` (random key, 1-bit-off key, invalid lengths/types) |
+| 3. Tampered ciphertext | `TestCiphertextTampering` (random bit ×25, every region, **every bit of the container**, truncation, extension, transplants) |
+| 4. Tampered metadata | `TestMetadataTampering` (13 semantic mutations, every header byte, non-canonical JSON, duplicate keys, length) |
+| 5. Output uniqueness | `TestUniqueness` (distinct nonces, wrapped DEKs, ciphertexts and tags; 300 encryptions; only `os.urandom`; no `random`) |
+| 6. Disk failures | `TestDiskSafety` (no output or leftovers after failures, no overwriting, rejects *symlinks*, simulated `ENOSPC` deletes the partial file) |
+| No oracles | `TestErrorHygiene` (same type and message across 8 failure modes; no `__cause__`/`__context__`) |
 
-Ejecución:
+Running them:
 
 ```bash
 .venv/bin/python -m pytest -v          # Linux / macOS
@@ -294,44 +295,44 @@ Ejecución:
 
 ---
 
-## 5. Limitaciones y trabajo futuro
+## 5. Limitations and future work
 
-* **Tamaño máximo ≈ 2 GiB** por la API *one-shot* (deliberada: garantiza no emitir texto plano sin verificar).
-  Para archivos mayores: AEAD por segmentos (construcción STREAM, como *streaming AEAD* de Tink o `age`), con
-  nonce = prefijo ‖ contador ‖ flag de último segmento.
-* Derivación de la KEK desde contraseña (Argon2id) y almacenamiento seguro.
-* Protección contra *rollback* y rotación de la KEK (re-envolver DEK sin re-cifrar documentos).
+* **Maximum size ≈ 2 GiB** because of the *one-shot* API (deliberate: it guarantees that no unverified plaintext is
+  emitted). For larger files: segmented AEAD (STREAM construction, like Tink's *streaming AEAD* or `age`), with
+  nonce = prefix ‖ counter ‖ last-segment flag.
+* Password-based KEK derivation (Argon2id) and secure storage.
+* Rollback protection and KEK rotation (re-wrapping DEKs without re-encrypting documents).
 
 ---
 
-## 6. Flujo de Git
+## 6. Git workflow
 
-El entregable se integra en el repositorio del equipo (`YCH14/Cryptography`), donde ya está el D1. La criptografía
-**nunca** entra directo a `main`: siempre mediante Pull Request con revisión de alguien distinto al autor.
+The deliverable is integrated into the team's repository (`YCH14/Cryptography`), where D1 already lives. Cryptography
+**never** goes straight into `main`: always through a Pull Request reviewed by someone other than the author.
 
-### 6.1 Estructura de ramas
+### 6.1 Branch structure
 
 ```mermaid
 flowchart LR
-    M1["main: D1 y README del equipo"] --> B["d2-symmetric-encryption"]
-    B --> C1["feat: módulo AEAD"]
-    C1 --> C2["test: suite pytest"]
-    C2 --> C3["docs: diseño D2"]
-    C3 --> PR{"Pull Request + revisión + CI"}
-    PR -->|aprobado| M2["main"]
+    M1["main: D1 and team README"] --> B["d2-symmetric-encryption"]
+    B --> C1["feat: AEAD module"]
+    C1 --> C2["test: pytest suite"]
+    C2 --> C3["docs: D2 design"]
+    C3 --> PR{"Pull Request + review + CI"}
+    PR -->|approved| M2["main"]
 ```
 
-### 6.2 Comandos
+### 6.2 Commands
 
 ```bash
-# 1. Partir de un main actualizado
+# 1. Start from an up-to-date main
 git checkout main
 git pull origin main
 
-# 2. Rama de trabajo del entregable
+# 2. Working branch for the deliverable
 git checkout -b d2-symmetric-encryption
 
-# 3. Commits atómicos (Conventional Commits)
+# 3. Atomic commits (Conventional Commits)
 git add vault/ requirements.txt requirements-dev.txt pytest.ini
 git commit -m "feat(vault): AEAD envelope encryption module (AES-256-GCM, per-file DEK)"
 git add tests/
@@ -339,25 +340,25 @@ git commit -m "test(vault): exhaustive pytest suite for D2 symmetric module"
 git add docs/ README.md .github/
 git commit -m "docs: D2 design, security rationale and threat model"
 
-# 4. Publicar la rama (nunca main)
+# 4. Publish the branch (never main)
 git push -u origin d2-symmetric-encryption
 
-# 5. Abrir el Pull Request hacia main (interfaz web de GitHub o GitHub CLI)
+# 5. Open the Pull Request into main (GitHub web interface or GitHub CLI)
 gh pr create --base main --head d2-symmetric-encryption \
   --title "D2: Symmetric authenticated encryption module" \
-  --body "Implementa vault/symmetric.py (AES-256-GCM + envelope encryption). Ver docs/design_d2.md."
+  --body "Implements vault/symmetric.py (AES-256-GCM + envelope encryption). See docs/design_d2.md."
 ```
 
-### 6.3 Reglas de revisión antes de mergear a `main`
+### 6.3 Review rules before merging into `main`
 
-1. El revisor es un integrante distinto del autor del código y usa la lista de verificación de
-   [`.github/pull_request_template.md`](../.github/pull_request_template.md) (aleatoriedad, nonces, AAD, manejo de
-   errores, ausencia de secretos en el repositorio). Los comentarios y las respuestas quedan en el propio PR.
-2. El *status check* `tests` ([`.github/workflows/tests.yml`](../.github/workflows/tests.yml)) debe pasar en el PR.
-3. Correcciones en la misma rama (`git commit` + `git push`); el PR se actualiza solo.
-4. Tras la aprobación, se hace el merge desde la interfaz de GitHub con **Create a merge commit** (no *Squash and
-   merge*): así se conservan los commits atómicos con la autoría de cada integrante, en lugar de reducirlos a uno
-   solo. Después se elimina la rama:
+1. The reviewer is a team member other than the code's author and uses the checklist in
+   [`.github/pull_request_template.md`](../.github/pull_request_template.md) (randomness, nonces, AAD, error
+   handling, absence of secrets in the repository). Comments and replies stay in the PR itself.
+2. The `tests` *status check* ([`.github/workflows/tests.yml`](../.github/workflows/tests.yml)) must pass on the PR.
+3. Fixes go on the same branch (`git commit` + `git push`); the PR updates itself.
+4. After approval, the merge is done from the GitHub interface with **Create a merge commit** (not *Squash and
+   merge*): this preserves the atomic commits with each member's authorship, instead of collapsing them into one.
+   Then the branch is deleted:
 
    ```bash
    git checkout main && git pull origin main
@@ -366,5 +367,5 @@ gh pr create --base main --head d2-symmetric-encryption \
    ```
 
 > [!NOTE]
-> Recomendado, a cargo del dueño del repositorio: activar la protección de `main` (*Settings → Branches*) para exigir
-> Pull Request, al menos 1 aprobación y el check `tests`, y prohibir el *push* directo.
+> Recommended, to be done by the repository owner: enable `main` protection (*Settings → Branches*) to require a
+> Pull Request, at least 1 approval and the `tests` check, and to forbid direct pushes.
