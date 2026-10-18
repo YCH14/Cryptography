@@ -352,9 +352,9 @@ gh pr create --base main --head d2-symmetric-encryption \
 ### 6.3 Review rules before merging into `main`
 
 1. The reviewer is a team member other than the code's author and uses the checklist in
-   [`.github/pull_request_template.md`](../.github/pull_request_template.md) (randomness, nonces, AAD, error
+   [`.github/pull_request_template.md`](../../.github/pull_request_template.md) (randomness, nonces, AAD, error
    handling, absence of secrets in the repository). Comments and replies stay in the PR itself.
-2. The `tests` *status check* ([`.github/workflows/tests.yml`](../.github/workflows/tests.yml)) must pass on the PR.
+2. The `tests` *status check* ([`.github/workflows/tests.yml`](../../.github/workflows/tests.yml)) must pass on the PR.
 3. Fixes go on the same branch (`git commit` + `git push`); the PR updates itself.
 4. After approval, the merge is done from the GitHub interface with **Create a merge commit** (not *Squash and
    merge*): this preserves the atomic commits with each member's authorship, instead of collapsing them into one.

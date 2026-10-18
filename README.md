@@ -1,68 +1,29 @@
-# Cryptography
-Calzontzi Hernández Yaretzi:  YCH14 (Yaretzi Calzontzi ) 
-Carrada Alarcón Bruno Gabriel: https://github.com/BrunoUNAM2002
-Álvarez Lugo Víctor Manuel: https://github.com/BeruR1se
-Bailon Cruz Owen Isaac: OwenIBC
+# Cryptography – Secure Digital Document Vault
 
-## D2 – Authenticated symmetric encryption
+Course project: a secure digital document vault that encrypts and signs files so they can be stored and shared on untrusted infrastructure (cloud or shared storage) without exposing or silently altering their contents.
 
-The `vault/` module encrypts files for a single owner with **AES-256-GCM** and *envelope encryption*: a fresh key
-per file, random nonces from the operating system, and a header authenticated as AAD, so any alteration is
-detected.
+## Deliverables
 
-- Design and security rationale: [docs/design_d2.md](docs/design_d2.md)
-- Module: [vault/symmetric.py](vault/symmetric.py)
-- Tests: [tests/test_symmetric.py](tests/test_symmetric.py)
+| ID | Deliverable | Folder |
+|----|-------------|--------|
+| D1 | Architecture & Threat Model: system design, security requirements, threat model and attack surface | [`D1-Architecture-Threat-Model/`](D1-Architecture-Threat-Model/) |
+| D2 | Secure Symmetric Encryption Module: AES-256-GCM, a fresh key per file, authenticated metadata and tamper detection | [`D2-Symmetric-Encryption/`](D2-Symmetric-Encryption/) |
+
+Each deliverable lives in its own folder with its own README and documentation.
+
+## Repository layout
 
 ```text
-vault/
-  symmetric.py     # encrypt_file / decrypt_file (+ in-memory variants)
-  exceptions.py    # DecryptionFailedError and validation errors
-tests/
-  test_symmetric.py
-docs/
-  design_d2.md     # design, security rationale, threat model, Git workflow
+.
+├── D1-Architecture-Threat-Model/   # D1: design document and architecture diagram
+├── D2-Symmetric-Encryption/        # D2: encryption module, tests and design document
+├── .github/                        # CI workflow and Pull Request template (must stay at the repo root)
+├── .gitignore
+└── README.md
 ```
 
-### Installation and tests
+## Team workflow
 
-Requires Python 3.11 or higher.
-
-```bash
-# Linux / macOS
-python3 -m venv .venv
-.venv/bin/pip install -r requirements-dev.txt
-.venv/bin/python -m pytest -v
-
-# Windows (Git Bash)
-python -m venv .venv
-.venv/Scripts/python -m pip install -r requirements-dev.txt
-.venv/Scripts/python -m pytest -v
-```
-
-### Usage
-
-```python
-from pathlib import Path
-from vault import encrypt_file, decrypt_file, generate_owner_key, DecryptionFailedError
-
-kek = generate_owner_key()  # 32 bytes from the OS CSPRNG; store it securely
-
-encrypt_file(Path("contract.pdf"), kek, Path("contract.pdf.vault"),
-             metadata={"case": "2026-17"})          # authenticated metadata, NOT encrypted
-
-try:
-    decrypt_file(Path("contract.pdf.vault"), kek, Path("contract_restored.pdf"))
-except DecryptionFailedError:
-    print("Invalid or tampered container, or wrong key")  # nothing is written to disk
-```
-
-Option: `include_filename=True` stores the original file name in the header (in clear, although authenticated). It is
-disabled by default. Output paths are never overwritten (`FileExistsError`).
-
-### Security in one line
-
-Every byte of the container (`magic | len | header | wrap_nonce | wrapped_dek | payload_nonce | ciphertext | tag`)
-is covered by an AEAD tag; any alteration produces a generic `DecryptionFailedError` with no output on disk. The
-threat model and what remains **out of scope** (replay/rollback, metadata confidentiality, key management) are in
-[docs/design_d2.md](docs/design_d2.md#33-threat-model).
+- Nothing is pushed directly to `main`. Work happens on a branch and is merged through a Pull Request.
+- Every Pull Request needs at least one review from someone other than its author, and the CI tests must pass.
+- Merge with **Create a merge commit** (not *Squash and merge*) so each member's commits are preserved.
