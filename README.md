@@ -8,6 +8,7 @@ Course project: a secure digital document vault that encrypts and signs files so
 |----|-------------|--------|
 | D1 | Architecture & Threat Model: system design, security requirements, threat model and attack surface | [`D1-Architecture-Threat-Model/`](D1-Architecture-Threat-Model/) |
 | D2 | Secure Symmetric Encryption Module: AES-256-GCM, a fresh key per file, authenticated metadata and tamper detection | [`D2-Symmetric-Encryption/`](D2-Symmetric-Encryption/) |
+| D3 | Multi-Recipient Hybrid Encryption: AES-256-GCM for the file, RSA-OAEP-SHA256 key wrapping per recipient, recipient list bound as AAD | [`D3-Hybrid-Encryption/`](D3-Hybrid-Encryption/) |
 
 Each deliverable lives in its own folder with its own README and documentation.
 
@@ -17,6 +18,7 @@ Each deliverable lives in its own folder with its own README and documentation.
 .
 ├── D1-Architecture-Threat-Model/   # D1: design document and architecture diagram
 ├── D2-Symmetric-Encryption/        # D2: encryption module, tests and design document
+├── D3-Hybrid-Encryption/           # D3: hybrid multi-recipient module, tests and design document
 ├── .github/                        # CI workflow and Pull Request template (must stay at the repo root)
 ├── .gitignore
 └── README.md
