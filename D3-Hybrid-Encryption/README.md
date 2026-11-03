@@ -105,3 +105,26 @@ que un `id` nunca puede confundirse con una huella; no hay *fallback* entre ambo
 
 **Qué no hace D3.** No autentica a quién cifró (no hay firma del remitente), no revoca accesos ya concedidos y no oculta
 la lista de destinatarios ni los metadatos (van en claro, autenticados). Ver §4.5 del documento de diseño.
+
+## Live demo (D4)
+
+`demo.py` runs the four scenarios required for the midterm review with one command. It generates temporary keys and files, and cleans up when it finishes.
+
+```bash
+# from D3-Hybrid-Encryption/, with the virtual environment active
+python demo.py             # pauses between scenarios (press Enter)
+python demo.py --no-pause  # runs everything at once
+```
+
+| # | Scenario | Expected result |
+|---|---|---|
+| 1 | Alice encrypts a file and decrypts it | Restored file has the same SHA-256 |
+| 2 | One container shared with Alice and Bob | Both decrypt the identical file |
+| 3 | Eve (not a recipient), also pretending to be Alice | Refused, no output file |
+| 4 | One ciphertext byte modified, or Bob removed from the recipient list | Decryption fails |
+
+The script exits with code 0 only if every scenario behaves as expected.
+
+## Architecture
+
+The architecture diagram, components, data flow and trust boundaries are in [`docs/architecture.md`](docs/architecture.md).
