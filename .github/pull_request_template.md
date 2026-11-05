@@ -26,3 +26,9 @@
 - [ ] The recipient list, `id`, `fingerprint`, `encrypted_dek` and algorithm identifiers are bound as AAD.
 - [ ] `id` and `fingerprint` occupy disjoint spaces and the entry lookup is deterministic, with no fallback.
 - [ ] Tests cover: 2 recipients, unauthorized user, tampered recipient list, wrong private key and removed recipient.
+
+### Only if the PR touches digital signatures (D5)
+
+- [ ] Encrypt-then-Sign (`VLT3`): signature covers canonical metadata, `signer_id`, `signer_fingerprint`, `recipients`, `nonce`, `ciphertext`, and `tag`.
+- [ ] Verify-then-Decrypt: Ed25519 signature is verified BEFORE any RSA-OAEP unwrapping or AES-256-GCM decryption is attempted.
+- [ ] Tests cover: valid multi-recipient signature, modified ciphertext, modified metadata/recipients, wrong public key, and removed/truncated signature.
