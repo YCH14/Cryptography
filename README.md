@@ -10,6 +10,7 @@ Course project: a secure digital document vault that encrypts and signs files so
 | D2 | Secure Symmetric Encryption Module: AES-256-GCM, a fresh key per file, authenticated metadata and tamper detection | [`D2-Symmetric-Encryption/`](D2-Symmetric-Encryption/) |
 | D3 | Multi-Recipient Hybrid Encryption: AES-256-GCM for the file, RSA-OAEP-SHA256 key wrapping per recipient, recipient list bound as AAD | [`D3-Hybrid-Encryption/`](D3-Hybrid-Encryption/) |
 | D5 | Signatures & Authentication: Ed25519 signature over the encrypted container (ciphertext, recipients and metadata), verified before decrypting | [`D5-Digital-Signatures/`](D5-Digital-Signatures/) |
+| D6 | Key Management: private keys encrypted with a password-derived key (Argon2id, AES-256-GCM), keystore format, backup and restore, key lifecycle | [`D6-Key-Management/`](D6-Key-Management/) |
 
 Each deliverable lives in its own folder with its own README and documentation.
 
@@ -21,6 +22,7 @@ Each deliverable lives in its own folder with its own README and documentation.
 ├── D2-Symmetric-Encryption/        # D2: encryption module, tests and design document
 ├── D3-Hybrid-Encryption/           # D3: hybrid multi-recipient module, tests and design document
 ├── D5-Digital-Signatures/          # D5: Ed25519 signatures on top of D3, tests and design document
+├── D6-Key-Management/              # D6: password-protected keystore on top of D5, tests and design document
 ├── .github/                        # CI workflow and Pull Request template (must stay at the repo root)
 ├── .gitignore
 └── README.md

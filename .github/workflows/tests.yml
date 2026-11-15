@@ -15,7 +15,7 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12"]
-        project: [D2-Symmetric-Encryption, D3-Hybrid-Encryption, D5-Digital-Signatures]
+        project: [D2-Symmetric-Encryption, D3-Hybrid-Encryption, D5-Digital-Signatures, D6-Key-Management]
     defaults:
       run:
         working-directory: ${{ matrix.project }}
