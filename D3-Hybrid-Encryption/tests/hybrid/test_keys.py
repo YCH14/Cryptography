@@ -1,15 +1,19 @@
-"""RSA key management for D3: key size, PEM round trip and fingerprints."""
+"""X25519 key management for D3: key type, PEM round trip and fingerprints."""
 
 from __future__ import annotations
 
+import hashlib
+
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec, ed25519
 
 from vault.exceptions import InvalidKeyError
 from vault.hybrid.keys import (
-    RSAKeyPair,
+    X25519KeyPair,
     export_private_key_pem,
     export_public_key_pem,
-    generate_rsa_keypair,
+    generate_x25519_keypair,
     get_public_key_fingerprint,
     load_private_key_pem,
     load_public_key_pem,
@@ -18,8 +22,8 @@ from vault.hybrid.keys import (
 
 
 @pytest.fixture(scope="module")
-def alice() -> RSAKeyPair:
-    return generate_rsa_keypair(2048)
+def alice() -> X25519KeyPair:
+    return generate_x25519_keypair()
 
 
 class TestFingerprintShape:
@@ -34,21 +38,45 @@ class TestFingerprintShape:
     def test_rejects_everything_else(self, value: object) -> None:
         assert not looks_like_fingerprint(value)
 
-    def test_real_fingerprint_has_reserved_shape(self, alice: RSAKeyPair) -> None:
+    def test_real_fingerprint_has_reserved_shape(self, alice: X25519KeyPair) -> None:
         assert looks_like_fingerprint(get_public_key_fingerprint(alice.public_key))
 
 
 class TestKeyManagement:
-    @pytest.mark.parametrize("size", [1024, 512, 0, -1, "2048", None])
-    def test_weak_or_invalid_key_size_is_rejected(self, size: object) -> None:
-        with pytest.raises(InvalidKeyError):
-            generate_rsa_keypair(size)  # type: ignore[arg-type]
+    def test_public_key_fingerprint_is_sha256_of_raw_public_bytes(self, alice: X25519KeyPair) -> None:
+        raw = alice.public_key.public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+        assert len(raw) == 32
+        assert get_public_key_fingerprint(alice.public_key) == hashlib.sha256(raw).hexdigest()
 
-    def test_public_pem_round_trip_keeps_fingerprint(self, alice: RSAKeyPair) -> None:
+    @pytest.mark.parametrize(
+        "bad_key",
+        [
+            ed25519.Ed25519PrivateKey.generate().public_key(),
+            ec.generate_private_key(ec.SECP256R1()).public_key(),
+            "not a key",
+            None,
+        ],
+    )
+    def test_non_x25519_public_key_is_rejected(self, bad_key: object) -> None:
+        with pytest.raises(InvalidKeyError):
+            get_public_key_fingerprint(bad_key)  # type: ignore[arg-type]
+
+    def test_non_x25519_pem_is_rejected(self) -> None:
+        ed_pem = ed25519.Ed25519PrivateKey.generate().public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+        with pytest.raises(InvalidKeyError):
+            load_public_key_pem(ed_pem)
+
+    def test_public_pem_round_trip_keeps_fingerprint(self, alice: X25519KeyPair) -> None:
         loaded = load_public_key_pem(export_public_key_pem(alice.public_key))
         assert get_public_key_fingerprint(loaded) == get_public_key_fingerprint(alice.public_key)
 
-    def test_encrypted_private_pem_round_trip(self, alice: RSAKeyPair) -> None:
+    def test_encrypted_private_pem_round_trip(self, alice: X25519KeyPair) -> None:
         pem = export_private_key_pem(alice.private_key, password=b"long passphrase")
         assert b"ENCRYPTED" in pem
         loaded = load_private_key_pem(pem, password=b"long passphrase")
@@ -56,7 +84,7 @@ class TestKeyManagement:
             alice.public_key
         )
 
-    def test_wrong_pem_password_is_rejected(self, alice: RSAKeyPair) -> None:
+    def test_wrong_pem_password_is_rejected(self, alice: X25519KeyPair) -> None:
         pem = export_private_key_pem(alice.private_key, password=b"right")
         with pytest.raises(InvalidKeyError):
             load_private_key_pem(pem, password=b"wrong")
