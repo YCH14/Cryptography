@@ -1,10 +1,10 @@
-"""RSA key management and public-key fingerprinting for Hybrid Encryption (D3).
+"""X25519 key management and public-key fingerprinting for Hybrid Encryption (D3).
 
 This module provides:
-- Generation of RSA key pairs (minimum 2048 bits; 3072/4096 bits recommended).
+- Generation of X25519 key pairs (the recipient keys of the ECIES key wrapping).
 - PEM import/export for public (``SubjectPublicKeyInfo``) and private (``PKCS8``) keys.
 - Deterministic, collision-resistant SHA-256 public key fingerprinting over the
-  canonical DER ``SubjectPublicKeyInfo`` encoding.
+  raw 32-byte X25519 public key (the key identifier chosen by the team).
 """
 
 from __future__ import annotations
@@ -16,22 +16,20 @@ from pathlib import Path
 from typing import Final, NamedTuple, Optional, Union
 
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey, RSAPublicKey
+from cryptography.hazmat.primitives.asymmetric.x25519 import (
+    X25519PrivateKey,
+    X25519PublicKey,
+)
 
 from vault.exceptions import InvalidKeyError
 
 __all__ = [
-    "MIN_RSA_KEY_SIZE",
-    "DEFAULT_RSA_KEY_SIZE",
-    "RECOMMENDED_RSA_KEY_SIZE",
-    "RSA_PUBLIC_EXPONENT",
-    "RSAKeyPair",
-    "generate_rsa_keypair",
+    "X25519KeyPair",
+    "generate_x25519_keypair",
     "get_public_key_fingerprint",
     "looks_like_fingerprint",
-    "validate_rsa_public_key",
-    "validate_rsa_private_key",
+    "validate_x25519_public_key",
+    "validate_x25519_private_key",
     "export_public_key_pem",
     "export_private_key_pem",
     "load_public_key_pem",
@@ -48,18 +46,6 @@ __all__ = [
     "load_private_key",
 ]
 
-MIN_RSA_KEY_SIZE: Final[int] = 2048
-"""Minimum permitted RSA modulus length in bits."""
-
-DEFAULT_RSA_KEY_SIZE: Final[int] = 2048
-"""Default RSA modulus length in bits for :func:`generate_rsa_keypair`."""
-
-RECOMMENDED_RSA_KEY_SIZE: Final[int] = 3072
-"""Recommended RSA modulus length in bits for long-term protection."""
-
-RSA_PUBLIC_EXPONENT: Final[int] = 65537
-"""Standard Fermat prime F4 public exponent (0x10001)."""
-
 _FINGERPRINT_RE: Final[re.Pattern[str]] = re.compile(r"[0-9a-f]{64}")
 
 
@@ -74,97 +60,67 @@ def looks_like_fingerprint(value: object) -> bool:
     return isinstance(value, str) and _FINGERPRINT_RE.fullmatch(value) is not None
 
 
-class RSAKeyPair(NamedTuple):
-    """An RSA key pair supporting both tuple unpacking ``(priv, pub)`` and named attributes."""
+class X25519KeyPair(NamedTuple):
+    """An X25519 key pair supporting both tuple unpacking ``(priv, pub)`` and named attributes."""
 
-    private_key: RSAPrivateKey
-    public_key: RSAPublicKey
+    private_key: X25519PrivateKey
+    public_key: X25519PublicKey
 
 
-def validate_rsa_public_key(pub_key: object) -> RSAPublicKey:
-    """Validate that ``pub_key`` is an :class:`RSAPublicKey` of at least 2048 bits.
+def validate_x25519_public_key(pub_key: object) -> X25519PublicKey:
+    """Validate that ``pub_key`` is an :class:`X25519PublicKey`.
 
     Raises:
-        InvalidKeyError: If ``pub_key`` is not an RSA public key or is smaller
-            than :data:`MIN_RSA_KEY_SIZE`.
+        InvalidKeyError: If ``pub_key`` is not an X25519 public key.
     """
-    if not isinstance(pub_key, RSAPublicKey):
-        raise InvalidKeyError("public key must be an RSAPublicKey instance")
-    if pub_key.key_size < MIN_RSA_KEY_SIZE:
-        raise InvalidKeyError(
-            f"RSA key size must be at least {MIN_RSA_KEY_SIZE} bits, got {pub_key.key_size}"
-        )
+    if not isinstance(pub_key, X25519PublicKey):
+        raise InvalidKeyError("public key must be an X25519PublicKey instance")
     return pub_key
 
 
-def validate_rsa_private_key(priv_key: object) -> RSAPrivateKey:
-    """Validate that ``priv_key`` is an :class:`RSAPrivateKey` of at least 2048 bits.
+def validate_x25519_private_key(priv_key: object) -> X25519PrivateKey:
+    """Validate that ``priv_key`` is an :class:`X25519PrivateKey`.
 
     Raises:
-        InvalidKeyError: If ``priv_key`` is not an RSA private key or is smaller
-            than :data:`MIN_RSA_KEY_SIZE`.
+        InvalidKeyError: If ``priv_key`` is not an X25519 private key.
     """
-    if not isinstance(priv_key, RSAPrivateKey):
-        raise InvalidKeyError("private key must be an RSAPrivateKey instance")
-    if priv_key.key_size < MIN_RSA_KEY_SIZE:
-        raise InvalidKeyError(
-            f"RSA key size must be at least {MIN_RSA_KEY_SIZE} bits, got {priv_key.key_size}"
-        )
+    if not isinstance(priv_key, X25519PrivateKey):
+        raise InvalidKeyError("private key must be an X25519PrivateKey instance")
     return priv_key
 
 
-def generate_rsa_keypair(key_size: int = DEFAULT_RSA_KEY_SIZE) -> RSAKeyPair:
-    """Generate a fresh RSA key pair ``(private_key, public_key)``.
+def generate_x25519_keypair() -> X25519KeyPair:
+    """Generate a fresh X25519 key pair ``(private_key, public_key)``."""
+    private_key = X25519PrivateKey.generate()
+    return X25519KeyPair(private_key=private_key, public_key=private_key.public_key())
 
-    Args:
-        key_size: RSA modulus length in bits (minimum 2048; 3072 or 4096 recommended).
 
-    Returns:
-        An :class:`RSAKeyPair` ``(private_key, public_key)``.
-
-    Raises:
-        InvalidKeyError: If ``key_size`` is not an integer or is less than 2048.
-    """
-    if type(key_size) is not int or key_size < MIN_RSA_KEY_SIZE:
-        raise InvalidKeyError(
-            f"RSA key_size must be an integer >= {MIN_RSA_KEY_SIZE}, got {key_size!r}"
-        )
-    private_key = rsa.generate_private_key(
-        public_exponent=RSA_PUBLIC_EXPONENT,
-        key_size=key_size,
+def public_key_raw_bytes(pub_key: X25519PublicKey) -> bytes:
+    """Return the raw 32-byte encoding of an X25519 public key."""
+    validated = validate_x25519_public_key(pub_key)
+    return validated.public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
     )
-    return RSAKeyPair(private_key=private_key, public_key=private_key.public_key())
 
 
-def get_public_key_fingerprint(pub_key: RSAPublicKey) -> str:
+def get_public_key_fingerprint(pub_key: X25519PublicKey) -> str:
     """Return the lowercase hex-encoded SHA-256 fingerprint of ``pub_key``.
 
-    The digest is computed over the canonical ASN.1 DER ``SubjectPublicKeyInfo``
-    (SPKI) representation of the RSA public key, providing deterministic,
-    collision-resistant recipient key identification independent of PEM headers
-    or whitespace.
-
-    Args:
-        pub_key: Recipient's :class:`RSAPublicKey`.
-
-    Returns:
-        64-character lowercase hexadecimal SHA-256 digest string.
+    The digest is computed over the raw 32-byte X25519 public key, which is the
+    key identifier chosen by the team for every key type (SHA-256 of the public
+    bytes). It is deterministic, collision-resistant and independent of PEM
+    headers or whitespace.
 
     Raises:
-        InvalidKeyError: If ``pub_key`` is not a valid :class:`RSAPublicKey`
-            meeting the minimum key size requirement.
+        InvalidKeyError: If ``pub_key`` is not an :class:`X25519PublicKey`.
     """
-    validated = validate_rsa_public_key(pub_key)
-    spki_der = validated.public_bytes(
-        encoding=serialization.Encoding.DER,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo,
-    )
-    return hashlib.sha256(spki_der).hexdigest()
+    return hashlib.sha256(public_key_raw_bytes(pub_key)).hexdigest()
 
 
-def export_public_key_pem(pub_key: RSAPublicKey) -> bytes:
-    """Serialize an :class:`RSAPublicKey` to PEM (``SubjectPublicKeyInfo``) bytes."""
-    validated = validate_rsa_public_key(pub_key)
+def export_public_key_pem(pub_key: X25519PublicKey) -> bytes:
+    """Serialize an :class:`X25519PublicKey` to PEM (``SubjectPublicKeyInfo``) bytes."""
+    validated = validate_x25519_public_key(pub_key)
     return validated.public_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PublicFormat.SubjectPublicKeyInfo,
@@ -172,17 +128,17 @@ def export_public_key_pem(pub_key: RSAPublicKey) -> bytes:
 
 
 def export_private_key_pem(
-    priv_key: RSAPrivateKey,
+    priv_key: X25519PrivateKey,
     password: Optional[bytes] = None,
 ) -> bytes:
-    """Serialize an :class:`RSAPrivateKey` to PEM (``PKCS8``) bytes.
+    """Serialize an :class:`X25519PrivateKey` to PEM (``PKCS8``) bytes.
 
     Args:
-        priv_key: RSA private key to export.
+        priv_key: X25519 private key to export.
         password: Optional passphrase bytes to encrypt the PKCS#8 container.
             If ``None``, the key is exported unencrypted.
     """
-    validated = validate_rsa_private_key(priv_key)
+    validated = validate_x25519_private_key(priv_key)
     if password is not None:
         if not isinstance(password, (bytes, bytearray, memoryview)) or len(password) == 0:
             raise InvalidKeyError("password must be non-empty bytes when provided")
@@ -199,8 +155,8 @@ def export_private_key_pem(
     )
 
 
-def load_public_key_pem(pem_data: Union[bytes, str]) -> RSAPublicKey:
-    """Load and validate an :class:`RSAPublicKey` from PEM data."""
+def load_public_key_pem(pem_data: Union[bytes, str]) -> X25519PublicKey:
+    """Load and validate an :class:`X25519PublicKey` from PEM data."""
     if isinstance(pem_data, str):
         raw = pem_data.encode("utf-8")
     elif isinstance(pem_data, (bytes, bytearray, memoryview)):
@@ -213,14 +169,14 @@ def load_public_key_pem(pem_data: Union[bytes, str]) -> RSAPublicKey:
     except (ValueError, TypeError) as exc:
         raise InvalidKeyError("invalid PEM public key data") from exc
 
-    return validate_rsa_public_key(loaded)
+    return validate_x25519_public_key(loaded)
 
 
 def load_private_key_pem(
     pem_data: Union[bytes, str],
     password: Optional[bytes] = None,
-) -> RSAPrivateKey:
-    """Load and validate an :class:`RSAPrivateKey` from PEM data."""
+) -> X25519PrivateKey:
+    """Load and validate an :class:`X25519PrivateKey` from PEM data."""
     if isinstance(pem_data, str):
         raw = pem_data.encode("utf-8")
     elif isinstance(pem_data, (bytes, bytearray, memoryview)):
@@ -239,10 +195,10 @@ def load_private_key_pem(
     except (ValueError, TypeError) as exc:
         raise InvalidKeyError("invalid PEM private key data or incorrect password") from exc
 
-    return validate_rsa_private_key(loaded)
+    return validate_x25519_private_key(loaded)
 
 
-def save_public_key_pem(pub_key: RSAPublicKey, path: Path) -> Path:
+def save_public_key_pem(pub_key: X25519PublicKey, path: Path) -> Path:
     """Write ``pub_key`` in PEM format to ``path``."""
     target = Path(path)
     pem = export_public_key_pem(pub_key)
@@ -251,7 +207,7 @@ def save_public_key_pem(pub_key: RSAPublicKey, path: Path) -> Path:
 
 
 def save_private_key_pem(
-    priv_key: RSAPrivateKey,
+    priv_key: X25519PrivateKey,
     path: Path,
     password: Optional[bytes] = None,
 ) -> Path:
@@ -273,16 +229,16 @@ def save_private_key_pem(
     return target
 
 
-def load_public_key_file(path: Path) -> RSAPublicKey:
-    """Read and validate an :class:`RSAPublicKey` from a PEM file at ``path``."""
+def load_public_key_file(path: Path) -> X25519PublicKey:
+    """Read and validate an :class:`X25519PublicKey` from a PEM file at ``path``."""
     return load_public_key_pem(Path(path).read_bytes())
 
 
 def load_private_key_file(
     path: Path,
     password: Optional[bytes] = None,
-) -> RSAPrivateKey:
-    """Read and validate an :class:`RSAPrivateKey` from a PEM file at ``path``."""
+) -> X25519PrivateKey:
+    """Read and validate an :class:`X25519PrivateKey` from a PEM file at ``path``."""
     return load_private_key_pem(Path(path).read_bytes(), password=password)
 
 

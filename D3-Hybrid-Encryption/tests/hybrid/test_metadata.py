@@ -1,4 +1,4 @@
-"""Authenticated ``filename`` / ``metadata`` in the VLT2 container (Deliverable D3).
+"""Authenticated ``filename`` / ``metadata`` in the VLT3 container (Deliverable D3).
 
 Both fields are always present in the container and in the AAD (``null`` / ``{}``
 when unused), are stored in clear, and are only returned after the GCM tag
@@ -26,24 +26,24 @@ from vault.hybrid.encryption import (
     encrypt_bytes_hybrid,
     encrypt_file_hybrid,
 )
-from vault.hybrid.keys import RSAKeyPair, generate_rsa_keypair
+from vault.hybrid.keys import X25519KeyPair, generate_x25519_keypair
 
 PLAINTEXT = b"contract body \x00\xff binary"
 META = {"owner": "alice", "invoice": "invoice-42", "tags": ["q4", "finance"], "n": 7}
 
 
 @pytest.fixture(scope="module")
-def alice() -> RSAKeyPair:
-    return generate_rsa_keypair(2048)
+def alice() -> X25519KeyPair:
+    return generate_x25519_keypair()
 
 
 @pytest.fixture(scope="module")
-def bob() -> RSAKeyPair:
-    return generate_rsa_keypair(2048)
+def bob() -> X25519KeyPair:
+    return generate_x25519_keypair()
 
 
 @pytest.fixture(scope="module")
-def recipients(alice: RSAKeyPair, bob: RSAKeyPair) -> list:
+def recipients(alice: X25519KeyPair, bob: X25519KeyPair) -> list:
     return [("alice", alice.public_key), ("bob", bob.public_key)]
 
 
@@ -62,7 +62,7 @@ def _edit(container: bytes, mutate) -> bytes:
 
 class TestRoundTrip:
     def test_every_recipient_gets_plaintext_filename_and_metadata(
-        self, container: bytes, alice: RSAKeyPair, bob: RSAKeyPair
+        self, container: bytes, alice: X25519KeyPair, bob: X25519KeyPair
     ) -> None:
         for rid, keys in [("alice", alice), ("bob", bob)]:
             doc = decrypt_document_hybrid(container, rid, keys.private_key)
@@ -72,12 +72,12 @@ class TestRoundTrip:
             assert doc.metadata == META
 
     def test_decrypt_bytes_still_returns_plain_bytes(
-        self, container: bytes, alice: RSAKeyPair
+        self, container: bytes, alice: X25519KeyPair
     ) -> None:
         assert decrypt_bytes_hybrid(container, "alice", alice.private_key) == PLAINTEXT
 
     def test_defaults_are_null_filename_and_empty_metadata(
-        self, recipients: list, alice: RSAKeyPair
+        self, recipients: list, alice: X25519KeyPair
     ) -> None:
         blob = encrypt_bytes_hybrid(PLAINTEXT, recipients)
         data = json.loads(blob)
@@ -87,7 +87,7 @@ class TestRoundTrip:
         assert (doc.filename, doc.metadata) == (None, {})
 
     def test_unicode_and_nested_metadata_roundtrip(
-        self, recipients: list, bob: RSAKeyPair
+        self, recipients: list, bob: X25519KeyPair
     ) -> None:
         meta = {"título": "Contrato ñandú 🔐", "nested": {"a": [1, 2.5, None, True], "b": {}}}
         blob = encrypt_bytes_hybrid(PLAINTEXT, recipients, filename="café.pdf", metadata=meta)
@@ -133,7 +133,7 @@ class TestTamperingBreaksEveryRecipient:
         ],
     )
     def test_modified_fields_fail_for_alice_and_bob(
-        self, mutate, container: bytes, alice: RSAKeyPair, bob: RSAKeyPair
+        self, mutate, container: bytes, alice: X25519KeyPair, bob: X25519KeyPair
     ) -> None:
         forged = _edit(container, mutate)
         for rid, keys in [("alice", alice), ("bob", bob)]:
@@ -143,7 +143,7 @@ class TestTamperingBreaksEveryRecipient:
 
     @pytest.mark.parametrize("field", ["filename", "metadata"])
     def test_removing_the_field_entirely_is_rejected(
-        self, field: str, container: bytes, alice: RSAKeyPair
+        self, field: str, container: bytes, alice: X25519KeyPair
     ) -> None:
         forged = _edit(container, lambda d: d.pop(field))
         with pytest.raises(DecryptionFailedError):
@@ -154,7 +154,7 @@ class TestTamperingBreaksEveryRecipient:
         [("filename", 123), ("filename", ["x"]), ("metadata", []), ("metadata", "str"), ("metadata", None)],
     )
     def test_wrong_field_types_are_rejected(
-        self, field: str, bad: Any, container: bytes, alice: RSAKeyPair
+        self, field: str, bad: Any, container: bytes, alice: X25519KeyPair
     ) -> None:
         forged = _edit(container, lambda d: d.__setitem__(field, bad))
         with pytest.raises(DecryptionFailedError):
@@ -200,22 +200,22 @@ class TestInvalidMetadataRejectedOnEncrypt:
 
 class TestFileApi:
     def test_file_name_and_metadata_are_stored_by_default(
-        self, recipients: list, alice: RSAKeyPair, tmp_path: Path
+        self, recipients: list, alice: X25519KeyPair, tmp_path: Path
     ) -> None:
         src = tmp_path / "report.docx"
         src.write_bytes(PLAINTEXT)
-        vault = encrypt_file_hybrid(src, recipients, tmp_path / "r.vlt2", {"dept": "legal"})
+        vault = encrypt_file_hybrid(src, recipients, tmp_path / "r.vlt3", {"dept": "legal"})
         doc = decrypt_document_hybrid(vault.read_bytes(), "alice", alice.private_key)
         assert doc.filename == "report.docx"
         assert doc.metadata == {"dept": "legal"}
 
     def test_include_filename_false_stores_null(
-        self, recipients: list, alice: RSAKeyPair, tmp_path: Path
+        self, recipients: list, alice: X25519KeyPair, tmp_path: Path
     ) -> None:
         src = tmp_path / "secret-name.txt"
         src.write_bytes(PLAINTEXT)
         vault = encrypt_file_hybrid(
-            src, recipients, tmp_path / "r.vlt2", include_filename=False
+            src, recipients, tmp_path / "r.vlt3", include_filename=False
         )
         assert b"secret-name" not in vault.read_bytes()
         doc = decrypt_document_hybrid(vault.read_bytes(), "alice", alice.private_key)
@@ -226,16 +226,16 @@ class TestFileApi:
     ) -> None:
         src = tmp_path / "a.bin"
         src.write_bytes(PLAINTEXT)
-        out = tmp_path / "never.vlt2"
+        out = tmp_path / "never.vlt3"
         with pytest.raises(InvalidMetadataError):
             encrypt_file_hybrid(src, recipients, out, {"bad": object()})
         assert not out.exists()
 
     def test_hostile_filename_never_influences_the_output_path(
-        self, recipients: list, alice: RSAKeyPair, tmp_path: Path
+        self, recipients: list, alice: X25519KeyPair, tmp_path: Path
     ) -> None:
         blob = encrypt_bytes_hybrid(PLAINTEXT, recipients, filename="../../escape.txt")
-        vault = tmp_path / "hostile.vlt2"
+        vault = tmp_path / "hostile.vlt3"
         vault.write_bytes(blob)
         out_dir = tmp_path / "out"
         out_dir.mkdir()
