@@ -1,6 +1,6 @@
 # D3 – Multi-Recipient Hybrid Encryption
 
-A file is encrypted **once** with AES-256-GCM; the file key (DEK) is then wrapped separately for each recipient with their RSA public key (RSA-OAEP-SHA256). The recipient list, key fingerprints, algorithms, `filename` and `metadata` are bound as AAD, so adding, removing or editing a recipient breaks decryption.
+A file is encrypted **once** with AES-256-GCM; the file key (DEK) is then wrapped separately for each recipient with **ECIES** built from `cryptography` primitives: a fresh ephemeral X25519 key, ECDH with the recipient's X25519 public key, HKDF-SHA256 and AES-256-GCM. RSA is not used anywhere. The recipient list (including each ephemeral public key), key fingerprints, algorithms, `filename` and `metadata` are bound as AAD, so adding, removing or editing a recipient breaks decryption.
 
 - Design and security rationale (Spanish): [`docs/hybrid_design_d3.md`](docs/hybrid_design_d3.md)
 - Modules: [`vault/hybrid/keys.py`](vault/hybrid/keys.py), [`vault/hybrid/encryption.py`](vault/hybrid/encryption.py)
@@ -14,11 +14,11 @@ D3-Hybrid-Encryption/
 │   ├── symmetric.py       # D2 module (unchanged)
 │   ├── exceptions.py      # D2 errors + RecipientNotFoundError
 │   └── hybrid/
-│       ├── keys.py        # RSA key pairs, PEM import/export, SHA-256 SPKI fingerprints
-│       └── encryption.py  # encrypt_file_hybrid / decrypt_file_hybrid (VLT2 container)
+│       ├── keys.py        # X25519 key pairs, PEM import/export, SHA-256 fingerprints of the raw public key
+│       └── encryption.py  # encrypt_file_hybrid / decrypt_file_hybrid (VLT3 container, ECIES)
 ├── tests/
 │   ├── test_symmetric.py  # D2 suite
-│   └── hybrid/            # test_keys.py, test_key_identification.py, test_hybrid.py, test_metadata.py
+│   └── hybrid/            # test_keys.py, test_key_identification.py, test_hybrid.py, test_metadata.py, test_ecies.py
 ├── docs/hybrid_design_d3.md
 ├── requirements.txt
 ├── requirements-dev.txt
@@ -52,7 +52,7 @@ from vault.hybrid.encryption import (
     encrypt_file_hybrid,
 )
 from vault.hybrid.keys import (
-    generate_rsa_keypair,
+    generate_x25519_keypair,
     get_public_key_fingerprint,
     save_private_key_pem,
     save_public_key_pem,
@@ -61,8 +61,8 @@ from vault.hybrid.keys import (
 )
 
 # 1. Cada persona genera su par de claves; la pública se comparte, la privada nunca.
-alice_priv, alice_pub = generate_rsa_keypair(3072)
-bob_priv, bob_pub = generate_rsa_keypair(3072)
+alice_priv, alice_pub = generate_x25519_keypair()
+bob_priv, bob_pub = generate_x25519_keypair()
 save_private_key_pem(alice_priv, Path("alice_priv.pem"), password=b"una-frase-larga")
 save_public_key_pem(alice_pub, Path("alice_pub.pem"))
 
@@ -74,24 +74,24 @@ Path("contrato.pdf").write_bytes(b"%PDF- contenido confidencial")
 encrypt_file_hybrid(
     Path("contrato.pdf"),
     recipients=[("alice", alice_pub), ("bob", bob_pub)],
-    output_path=Path("contrato.vlt2"),
+    output_path=Path("contrato.vlt3"),
     metadata={"departamento": "legal"},     # opcional: autenticado, en claro
     # include_filename=False,               # no guardar el nombre original
 )
 
 # 4. Cada destinatario descifra de forma independiente con su clave privada.
 alice_priv = load_private_key_file(Path("alice_priv.pem"), password=b"una-frase-larga")
-decrypt_file_hybrid(Path("contrato.vlt2"), "alice", alice_priv, Path("contrato_alice.pdf"))
-decrypt_file_hybrid(Path("contrato.vlt2"), "bob", bob_priv, Path("contrato_bob.pdf"))
+decrypt_file_hybrid(Path("contrato.vlt3"), "alice", alice_priv, Path("contrato_alice.pdf"))
+decrypt_file_hybrid(Path("contrato.vlt3"), "bob", bob_priv, Path("contrato_bob.pdf"))
 
 # 5. Para leer también filename y metadata (sólo se devuelven si el tag verifica):
-doc = decrypt_document_hybrid(Path("contrato.vlt2").read_bytes(), "alice", alice_priv)
+doc = decrypt_document_hybrid(Path("contrato.vlt3").read_bytes(), "alice", alice_priv)
 print(doc.filename, doc.metadata)           # contrato.pdf {'departamento': 'legal'}
 
 # 6. Quien no es destinatario, o usa la clave equivocada, no obtiene nada.
-carol_priv, _ = generate_rsa_keypair(3072)
+carol_priv, _ = generate_x25519_keypair()
 try:
-    decrypt_file_hybrid(Path("contrato.vlt2"), "carol", carol_priv, Path("x.pdf"))
+    decrypt_file_hybrid(Path("contrato.vlt3"), "carol", carol_priv, Path("x.pdf"))
 except RecipientNotFoundError:
     print("Carol no figura en la lista de destinatarios")
 except DecryptionFailedError:

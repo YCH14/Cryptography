@@ -25,7 +25,7 @@ The design has three zones separated by trust boundaries:
 ## Data flow
 
 1. **Encrypt (sender).** Generate a random 256-bit file key from the OS CSPRNG. Encrypt the file with AES-256-GCM using a random 96-bit nonce.
-2. **Share (sender).** Wrap the file key separately for each recipient with RSA-OAEP (SHA-256). Each recipient entry holds an id, the SHA-256 fingerprint of the public key and the encrypted file key.
+2. **Share (sender).** Wrap the file key separately for each recipient with ECIES (a fresh ephemeral X25519 key, ECDH, HKDF-SHA256 and AES-256-GCM). Each recipient entry holds an id, the SHA-256 fingerprint of the public key, the ephemeral public key and the encrypted file key.
 3. **Authenticate (sender).** The header and the recipient list are the associated data (AAD) of AES-GCM, so changing any of them breaks the tag.
 4. **Store or send.** The container goes to any storage or network.
 5. **Decrypt (recipient).** Find the own entry by id or fingerprint, unwrap the file key with the private key, verify the tag and decrypt. On any failure there is one generic error and no output file.
