@@ -28,26 +28,57 @@ Users need to store and share digital documents securely across untrusted infras
 
 ## 3. Security Requirements
 
-- **Confidentiality of file contents:** An attacker who obtains the encrypted container from the "UNTRUSTED ENVIRONMENT" must not be able to learn anything about the file contents without possessing the recipient's protected private key.
-- **Integrity of file contents:** Any alteration of the package in the untrusted environment must be mandatorily detected in Step 5 ("Verify package") before attempting decryption.
-- **Authenticity of file sender:** The system must prove to the recipient (in Step 7, "Decrypt and verify") that the package irrefutably originates from the claimed sender's public key.
-- **Confidentiality of private keys:** The "private key material" must remain immovable within the local Key Store and under no circumstances cross into the untrusted environment.
-- **Protection against tampering:** Public information and metadata linked to the file must not be detachable or reassignable by an attacker without invalidating the signature verification.
+- **SR1 – Confidentiality of file contents:** An attacker who obtains the encrypted container from the "UNTRUSTED ENVIRONMENT" must not be able to learn anything about the file contents without possessing the recipient's protected private key.
+- **SR2 – Integrity of file contents:** Any alteration of the package in the untrusted environment must be mandatorily detected in Step 5 ("Verify package") before attempting decryption.
+- **SR3 – Authenticity of file sender:** The system must prove to the recipient (in Step 7, "Decrypt and verify") that the package irrefutably originates from the claimed sender's public key.
+- **SR4 – Confidentiality of private keys:** The "private key material" must remain immovable within the local Key Store and under no circumstances cross into the untrusted environment.
+- **SR5 – Protection against tampering:** Public information and metadata linked to the file must not be detachable or reassignable by an attacker without invalidating the signature verification.
 
 ## 4. Threat Model
 
 **Assets (What must be protected):**
 
-- **File contents:** Requires maximum confidentiality and integrity (protection steps 1 and 2).
-- **Private keys:** Requires critical confidentiality; stored exclusively in trusted environments (Key Store).
-- **User passwords:** Requires critical confidentiality (used to unlock the local Key Store).
-- **Signature validity / Metadata:** Requires integrity protection against tampering and forgery.
+- **A1 – File contents:** Requires maximum confidentiality and integrity (protection steps 1 and 2).
+- **A2 – Private keys:** Requires critical confidentiality; stored exclusively in trusted environments (Key Store).
+- **A3 – User passwords:** Requires critical confidentiality (used to unlock the local Key Store).
+- **A4 – Signature validity / Metadata:** Requires integrity protection against tampering and forgery.
 
 **Adversaries (Who are you defending against):**
 
-- **Malicious Storage Provider:** The administrator of the "STORAGE" who has read access to all stored encrypted containers.
-- **Network Attacker:** An adversary capable of intercepting the signed and encrypted package while in transit through the "UNTRUSTED ENVIRONMENT."
-- **Attacker with temporary local access:** An attacker who gains physical access to a powered-off device and attempts to extract the protected Key Store.
+- **ADV1 – Malicious Storage Provider:** The administrator of the "STORAGE" who has read access to all stored encrypted containers.
+- **ADV2 – Network Attacker:** An adversary capable of intercepting the signed and encrypted package while in transit through the "UNTRUSTED ENVIRONMENT."
+- **ADV3 – Attacker with temporary local access:** An attacker who gains physical access to a powered-off device and attempts to extract the protected Key Store.
+
+**Threats (What could happen to the assets):**
+
+| ID | Threat | Adversary | Asset at risk |
+|---|---|---|---|
+| T1 | Reading stored or intercepted ciphertext | ADV1, ADV2 | A1 |
+| T2 | Tampering with the ciphertext or the authentication tag | ADV1, ADV2 | A1, A4 |
+| T3 | Adding, removing, reordering or editing recipients, `filename` or `metadata` | ADV1, ADV2 | A4 |
+| T4 | Forging, transplanting or stripping the signature | ADV1, ADV2 | A4 |
+| T5 | Replaying a valid package or serving an older version (rollback) | ADV1, ADV2 | A1, A4 |
+| T6 | Substituting a recipient or signer public key | ADV2 | A1 |
+| T7 | Offline guessing of the Key Store password | ADV3 | A2, A3 |
+| T8 | Malformed or hostile container input (parser abuse) | ADV1, ADV2 | A1 |
+| T9 | Hostile `filename` or oversized `metadata` | ADV1, ADV2 | A4 |
+| T10 | Importing an invalid or unsuitable public key | ADV2 | A1, A2 |
+
+**Attack Scenarios (How each threat would be carried out):**
+
+| ID | Threat | Attacker | What the attacker does | If there were no defense |
+|---|---|---|---|---|
+| S1 | T1 | ADV1 | Copies every container stored on the server and tries to read the files. | The provider would read all documents. |
+| S2 | T2 | ADV1 | Flips one byte of the ciphertext or the tag of a stored package and returns it to the recipient. | The recipient would receive a corrupted or altered file without noticing. |
+| S3 | T3 | ADV1 | Removes a recipient, adds another one, reorders the list or edits `filename` / `metadata` of a package. | The sender would appear to have authorized different people or described a different file. |
+| S4 | T4 | ADV2 | Copies the signature of a valid package and attaches it to a malicious container. | The forged file would be accepted as if the sender had produced it. |
+| S5 | T4 | ADV1 | Deletes the signature of a package and delivers it unsigned. | An unsigned file would pass as authentic. |
+| S6 | T5 | ADV1 | Keeps an old valid package and delivers it again later, or serves it instead of the newest version. | An outdated or duplicated package would be accepted as the current one. |
+| S7 | T6 | ADV2 | Replaces the recipient's public key with their own before the sender encrypts. | The attacker, not the recipient, could decrypt the file. |
+| S8 | T7 | ADV3 | Steals a powered-off device, copies the Key Store and tries passwords offline. | A weak password would give the attacker the private key. |
+| S9 | T8 | ADV1 | Sends a hostile container: duplicate JSON keys, missing or extra fields, invalid base64, very large fields. | The application could crash, run out of memory or interpret the container differently from the signer. |
+| S10 | T9 | ADV1 | Sets `filename` to a path such as `../../x` or attaches a very large `metadata`. | A file could be written outside the intended folder or memory could be exhausted. |
+| S11 | T10 | ADV2 | Hands over a public key file of the wrong type, a corrupted PEM or a key that does not match the expected fingerprint. | An unsuitable key would be used silently. |
 
 **Attacker Capabilities:**
 
@@ -69,6 +100,9 @@ Users need to store and share digital documents securely across untrusted infras
 | Package Retrieval (Read Ciphertext) | The storage delivers an old or corrupted package to the "TRUSTED: RECIPIENT" (Replay attack). | Data Integrity / Freshness | Inclusion of timestamps or nonces validated during verification. |
 | Key Store Access | Brute-force attacks against the "protected private key reference." | Key Confidentiality | Use of robust key derivation functions (e.g., Argon2id) and strong passwords. |
 | Signature Verification (Step 5) | An attacker separates the signature from a valid document and attaches it to a malicious one, causing the receiver to accept it. | Authenticity / Non-repudiation | The digital signature must be calculated over the entire package and its intrinsic metadata. |
+| Package parsing (container JSON) | Hostile container: duplicate keys, extra or missing fields, invalid base64, very large fields, deep nesting. | System Integrity / Availability | The parser accepts only the exact set of fields, rejects duplicate keys and non-canonical base64, enforces size limits, and reports every failure with one generic error. |
+| Metadata processing (`filename`, `metadata`) | The sender-controlled `filename` contains a path such as `../../x`, or `metadata` is huge or is changed in transit. | Integrity / System Integrity | `filename` is untrusted and never used to build an output path (the caller chooses it); `filename` and `metadata` are size-limited and authenticated, so a change breaks the tag and the signature. |
+| Public key import | A key of the wrong type, a corrupted PEM, a substituted key or a key that does not match the expected fingerprint. | Authenticity / Key Confidentiality | Imports accept only the expected key type and reject malformed PEM; the key fingerprint (SHA-256 of the raw public key) is computed deterministically so it can be compared out of band; recipient IDs cannot imitate a fingerprint. |
 
 ## 7. CLI Interface Proposal
 
