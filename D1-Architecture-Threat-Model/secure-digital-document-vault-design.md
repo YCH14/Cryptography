@@ -104,7 +104,46 @@ Users need to store and share digital documents securely across untrusted infras
 | Metadata processing (`filename`, `metadata`) | The sender-controlled `filename` contains a path such as `../../x`, or `metadata` is huge or is changed in transit. | Integrity / System Integrity | `filename` is untrusted and never used to build an output path (the caller chooses it); `filename` and `metadata` are size-limited and authenticated, so a change breaks the tag and the signature. |
 | Public key import | A key of the wrong type, a corrupted PEM, a substituted key or a key that does not match the expected fingerprint. | Authenticity / Key Confidentiality | Imports accept only the expected key type and reject malformed PEM; the key fingerprint (SHA-256 of the raw public key) is computed deterministically so it can be compared out of band; recipient IDs cannot imitate a fingerprint. |
 
-## 7. CLI Interface Proposal
+## 7. Design Constraints and Traceability
+
+### 7.1 Design Constraints
+
+Each constraint is a concrete design decision of the project. "Status" tells whether it is already implemented (deliverable in parentheses), planned, or only an assumption.
+
+| ID | Design constraint | Status |
+|---|---|---|
+| C1 | Each file is encrypted once with AES-256-GCM under a fresh 256-bit key (DEK) and a random 96-bit nonce. | Implemented (D2, D3) |
+| C2 | The DEK is wrapped separately for each recipient (ECIES: ephemeral X25519, HKDF-SHA256, AES-256-GCM); the header, `filename`, `metadata` and the full recipient list are bound as AAD. | Implemented (D3) |
+| C3 | The sender signs the SHA-256 digest of the whole container except the signature with Ed25519; the recipient verifies the signature and the `signer_id` before decrypting. | Implemented (D5) |
+| C4 | Every failure while opening a container is reported with one generic error that does not chain the cause, and nothing is written to disk on failure. | Implemented (D2, D3, D5) |
+| C5 | Strict container parsing: exact field set, duplicate keys rejected, strict base64, and size limits for `metadata` and plaintext. | Implemented (D2, D3) |
+| C6 | `filename` is untrusted: it is never used to build an output path. | Implemented (D3) |
+| C7 | Public keys are imported only if they are of the expected type; the key fingerprint is the SHA-256 of the raw public key; recipient IDs may not look like a fingerprint. | Implemented (D3, D5) |
+| C8 | Private keys are stored only in a password-protected Key Store (Argon2id, AES-256-GCM, with the format, KDF parameters, salt and metadata authenticated); the password is not stored and decrypted keys are not cached. | Implemented (D6) |
+| C9 | Replay and rollback detection: a unique, signed container identifier checked by the recipient. | Planned |
+| C10 | Key rotation and revocation workflow for private keys. | Planned |
+| C11 | Public keys of senders and recipients are authentic: they are obtained and confirmed out of band (for example by comparing fingerprints). | Assumption, not enforced by the software |
+
+### 7.2 Traceability Matrix
+
+Each row follows one chain: asset → threat → attack scenario → security requirement → design constraint.
+
+| Asset | Threat | Scenario | Security requirement | Design constraint |
+|---|---|---|---|---|
+| A1 | T1 | S1 | SR1 | C1, C2 |
+| A1, A4 | T2 | S2 | SR2 | C1, C3, C4 |
+| A4 | T3 | S3 | SR2, SR5 | C2, C3 |
+| A4 | T4 | S4, S5 | SR3, SR5 | C3, C4 |
+| A1, A4 | T5 | S6 | SR2 | C3 (the timestamp is signed), C9 (planned) |
+| A1 | T6 | S7 | SR1, SR3 | C7, C11 |
+| A2, A3 | T7 | S8 | SR4 | C8, C10 (planned) |
+| A1 | T8 | S9 | SR2 | C4, C5 |
+| A4 | T9 | S10 | SR5 | C5, C6 |
+| A1, A2 | T10 | S11 | SR1, SR3 | C7 |
+
+Coverage check: every asset (A1–A4), every security requirement (SR1–SR5), every scenario (S1–S11) and every constraint (C1–C11) appears at least once.
+
+## 8. CLI Interface Proposal
 
 To operate the vault in alignment with the architectural diagram, the system will expose the following console commands:
 
