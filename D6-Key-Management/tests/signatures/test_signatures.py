@@ -7,7 +7,7 @@ import json
 import pytest
 
 from vault.exceptions import MissingSignatureError, SignatureVerificationError
-from vault.hybrid import generate_rsa_keypair
+from vault.hybrid import generate_x25519_keypair
 from vault.hybrid.encryption import encrypt_bytes_hybrid
 from vault.signatures import (
     generate_ed25519_keypair,
@@ -20,7 +20,7 @@ PLAINTEXT = b"Secure Digital Document Vault - D5"
 
 @pytest.fixture(scope="module")
 def bob():
-    return generate_rsa_keypair()
+    return generate_x25519_keypair()
 
 
 @pytest.fixture(scope="module")
@@ -75,4 +75,15 @@ def test_signature_removed_rejected(signed, bob, alice_signing_keys):
     _, alice_public = alice_signing_keys
     del signed["signature"]
     with pytest.raises(MissingSignatureError):
+        verify_and_decrypt(_dump(signed), alice_public, "bob", bob.private_key)
+
+
+def test_modified_ephemeral_key_rejected(signed, bob, alice_signing_keys):
+    """The ECIES ephemeral public key of each recipient is covered by the signature."""
+    _, alice_public = alice_signing_keys
+    original = base64.b64decode(signed["recipients"][0]["ephemeral_public_key"])
+    forged = bytearray(original)
+    forged[0] ^= 0x01
+    signed["recipients"][0]["ephemeral_public_key"] = base64.b64encode(bytes(forged)).decode("ascii")
+    with pytest.raises(SignatureVerificationError):
         verify_and_decrypt(_dump(signed), alice_public, "bob", bob.private_key)

@@ -1,6 +1,8 @@
 """Password-protected key store for private keys (D6).
 
-A private key is never stored in plaintext.  It is serialized as PKCS#8 (DER),
+A private key is never stored in plaintext.  Two key types are accepted: the
+X25519 key of D3 (ECIES) and the Ed25519 key of D5 (signatures).  RSA keys are
+not supported.  The key is serialized as PKCS#8 (DER),
 encrypted with AES-256-GCM under a key derived from the user's password with
 Argon2id, and stored in a directory with this layout::
 
@@ -42,12 +44,12 @@ from typing import Any, Final, Optional, Union
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
 
 from vault.exceptions import InvalidKeyError, KeystoreAccessError, KeystoreError
-from vault.hybrid.keys import get_public_key_fingerprint, validate_rsa_private_key
+from vault.hybrid.keys import get_public_key_fingerprint, validate_x25519_private_key
 from vault.signatures.keys import get_signer_id
 
 __all__ = [
@@ -92,7 +94,7 @@ _MAX_LANES: Final[int] = 16
 _MAX_MEMORY_KIB: Final[int] = 1024 * 1024
 
 _MAX_FILE_SIZE: Final[int] = 64 * 1024
-_KEY_TYPES: Final[frozenset[str]] = frozenset({"RSA", "Ed25519"})
+_KEY_TYPES: Final[frozenset[str]] = frozenset({"X25519", "Ed25519"})
 _METADATA_FIELDS: Final[frozenset[str]] = frozenset(
     {"version", "owner", "key_type", "key_id", "created"}
 )
@@ -100,7 +102,7 @@ _KDF_FIELDS: Final[frozenset[str]] = frozenset(
     {"kdf", "iterations", "lanes", "memory_cost_kib", "length"}
 )
 
-PrivateKey = Union[RSAPrivateKey, Ed25519PrivateKey]
+PrivateKey = Union[X25519PrivateKey, Ed25519PrivateKey]
 Password = Union[str, bytes]
 
 
@@ -119,13 +121,14 @@ def create_keystore(
 
     Args:
         path: Directory to create.  It must not exist (nothing is overwritten).
-        private_key: An RSA (D3) or Ed25519 (D5) private key.
+        private_key: An X25519 (D3) or Ed25519 (D5) private key.
         password: The user's password; asked with ``getpass`` when ``None``.
         owner: Identifier of the key's owner (for example the D3 recipient ``id``).
 
     Raises:
         KeystoreError: ``path`` already exists, or ``owner`` / ``password`` is empty.
-        InvalidKeyError: ``private_key`` is not a valid RSA or Ed25519 private key.
+        InvalidKeyError: ``private_key`` is not an X25519 or Ed25519 private key
+            (an RSA key, for example, is refused).
     """
     target = Path(path)
     if target.exists():
@@ -195,7 +198,7 @@ def unlock_private_key(
     Args:
         path: Keystore directory.
         password: The password; asked with ``getpass`` when ``None``.
-        expected_key_type: ``"RSA"`` or ``"Ed25519"``; refuses a keystore that
+        expected_key_type: ``"X25519"`` or ``"Ed25519"``; refuses a keystore that
             holds the other type, so a key is never used for the wrong purpose.
 
     Raises:
@@ -317,13 +320,17 @@ def _derive_key(password: bytes, salt: bytes, kdf_parameters: dict[str, Any]) ->
 
 
 def _describe_key(private_key: object) -> tuple[str, str]:
-    """Return ``(key_type, key_id)``; the id follows the rules of D3 (RSA) and D5 (Ed25519)."""
-    if isinstance(private_key, RSAPrivateKey):
-        validated = validate_rsa_private_key(private_key)
-        return "RSA", get_public_key_fingerprint(validated.public_key())
+    """Return ``(key_type, key_id)``.
+
+    For both types the id is the SHA-256 of the raw 32-byte public key, the
+    same value D3 uses as the recipient fingerprint and D5 as the ``signer_id``.
+    """
+    if isinstance(private_key, X25519PrivateKey):
+        validated = validate_x25519_private_key(private_key)
+        return "X25519", get_public_key_fingerprint(validated.public_key())
     if isinstance(private_key, Ed25519PrivateKey):
         return "Ed25519", get_signer_id(private_key.public_key())
-    raise InvalidKeyError("private_key must be an RSA or Ed25519 private key")
+    raise InvalidKeyError("private_key must be an X25519 or Ed25519 private key")
 
 
 def _check_metadata(metadata: Any) -> dict[str, Any]:
@@ -392,7 +399,7 @@ def _try_unlock(directory: Path, password: bytes) -> Optional[tuple[str, Private
 
         private_key = serialization.load_der_private_key(plaintext, password=None)
         del plaintext
-        if not isinstance(private_key, (RSAPrivateKey, Ed25519PrivateKey)):
+        if not isinstance(private_key, (X25519PrivateKey, Ed25519PrivateKey)):
             return None
         key_type, key_id = _describe_key(private_key)
         if key_type != metadata["key_type"] or key_id != metadata["key_id"]:

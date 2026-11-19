@@ -12,7 +12,7 @@ from vault.exceptions import (
     KeystoreAccessError,
     KeystoreError,
 )
-from vault.hybrid import generate_rsa_keypair
+from vault.hybrid import generate_x25519_keypair
 from vault.hybrid.encryption import decrypt_bytes_hybrid, encrypt_bytes_hybrid
 from vault.keystore import (
     KEYSTORE_FILES,
@@ -32,8 +32,8 @@ PLAINTEXT = b"Secure Digital Document Vault - D6"
 
 
 @pytest.fixture(scope="module")
-def alice_rsa():
-    return generate_rsa_keypair()
+def alice_x25519():
+    return generate_x25519_keypair()
 
 
 @pytest.fixture(scope="module")
@@ -42,8 +42,8 @@ def alice_ed25519():
 
 
 @pytest.fixture()
-def keystore(tmp_path, alice_rsa):
-    return create_keystore(tmp_path / "alice-rsa", alice_rsa.private_key, PASSWORD, "alice")
+def keystore(tmp_path, alice_x25519):
+    return create_keystore(tmp_path / "alice-x25519", alice_x25519.private_key, PASSWORD, "alice")
 
 
 def _der(private_key) -> bytes:
@@ -57,23 +57,23 @@ def _der(private_key) -> bytes:
 # 1. Correct password -> access granted ---------------------------------------
 
 
-def test_correct_password_access_granted(keystore, alice_rsa):
+def test_correct_password_access_granted(keystore, alice_x25519):
     unlocked = unlock_private_key(keystore, PASSWORD)
-    assert _der(unlocked) == _der(alice_rsa.private_key)
+    assert _der(unlocked) == _der(alice_x25519.private_key)
 
     # The unlocked key is the one D3 needs: it opens a container shared with alice.
-    container = encrypt_bytes_hybrid(PLAINTEXT, [("alice", alice_rsa.public_key)])
+    container = encrypt_bytes_hybrid(PLAINTEXT, [("alice", alice_x25519.public_key)])
     assert decrypt_bytes_hybrid(container, "alice", unlocked) == PLAINTEXT
 
 
-def test_ed25519_key_works_with_d5(tmp_path, alice_rsa, alice_ed25519):
+def test_ed25519_key_works_with_d5(tmp_path, alice_x25519, alice_ed25519):
     private_key, public_key = alice_ed25519
     path = create_keystore(tmp_path / "alice-ed25519", private_key, PASSWORD, "alice")
     signing_key = unlock_private_key(path, PASSWORD, expected_key_type="Ed25519")
 
-    container = encrypt_bytes_hybrid(PLAINTEXT, [("alice", alice_rsa.public_key)])
+    container = encrypt_bytes_hybrid(PLAINTEXT, [("alice", alice_x25519.public_key)])
     signed = sign_container(container, signing_key)
-    assert verify_and_decrypt(signed, public_key, "alice", alice_rsa.private_key) == PLAINTEXT
+    assert verify_and_decrypt(signed, public_key, "alice", alice_x25519.private_key) == PLAINTEXT
 
 
 def test_password_is_asked_when_not_given(keystore, monkeypatch):
@@ -137,7 +137,7 @@ def test_modified_keystore_fails(keystore, tamper):
 def test_encrypted_key_swapped_from_another_keystore_fails(tmp_path, keystore):
     # Same password, different key: binding the metadata to the ciphertext
     # keeps the identity of the key consistent.
-    other = create_keystore(tmp_path / "bob-rsa", generate_rsa_keypair().private_key, PASSWORD, "bob")
+    other = create_keystore(tmp_path / "bob-x25519", generate_x25519_keypair().private_key, PASSWORD, "bob")
     shutil.copyfile(other / "encrypted_private_key", keystore / "encrypted_private_key")
     with pytest.raises(KeystoreAccessError):
         unlock_private_key(keystore, PASSWORD)
@@ -146,14 +146,14 @@ def test_encrypted_key_swapped_from_another_keystore_fails(tmp_path, keystore):
 # 4. Backup -> restore works --------------------------------------------------
 
 
-def test_backup_restore_works(tmp_path, keystore, alice_rsa):
+def test_backup_restore_works(tmp_path, keystore, alice_x25519):
     backup = backup_keystore(keystore, tmp_path / "backup")
     assert sorted(p.name for p in backup.iterdir()) == sorted(KEYSTORE_FILES)
 
     shutil.rmtree(keystore)  # the original keystore is lost
     restored = restore_keystore(backup, keystore, PASSWORD)
 
-    assert _der(unlock_private_key(restored, PASSWORD)) == _der(alice_rsa.private_key)
+    assert _der(unlock_private_key(restored, PASSWORD)) == _der(alice_x25519.private_key)
 
 
 def test_corrupted_backup_is_not_restored(tmp_path, keystore):
@@ -168,13 +168,13 @@ def test_corrupted_backup_is_not_restored(tmp_path, keystore):
 # 5. Stolen keystore alone -> cannot decrypt ----------------------------------
 
 
-def test_stolen_keystore_alone_cannot_decrypt(tmp_path, keystore, alice_rsa):
-    container = encrypt_bytes_hybrid(PLAINTEXT, [("alice", alice_rsa.public_key)])
+def test_stolen_keystore_alone_cannot_decrypt(tmp_path, keystore, alice_x25519):
+    container = encrypt_bytes_hybrid(PLAINTEXT, [("alice", alice_x25519.public_key)])
     stolen = tmp_path / "attacker-copy"
     shutil.copytree(keystore, stolen)  # the attacker has every keystore file
 
     # No file holds the key in the clear.
-    key_der = _der(alice_rsa.private_key)
+    key_der = _der(alice_x25519.private_key)
     for name in KEYSTORE_FILES:
         content = (stolen / name).read_bytes()
         assert key_der not in content
@@ -188,10 +188,10 @@ def test_stolen_keystore_alone_cannot_decrypt(tmp_path, keystore, alice_rsa):
 
     # ...and a different key cannot open what was shared with alice.
     with pytest.raises(DecryptionFailedError):
-        decrypt_bytes_hybrid(container, "alice", generate_rsa_keypair().private_key)
+        decrypt_bytes_hybrid(container, "alice", generate_x25519_keypair().private_key)
 
 
-def test_existing_keystore_is_never_overwritten(keystore, alice_rsa):
+def test_existing_keystore_is_never_overwritten(keystore, alice_x25519):
     with pytest.raises(KeystoreError):
-        create_keystore(keystore, alice_rsa.private_key, "another password", "alice")
+        create_keystore(keystore, alice_x25519.private_key, "another password", "alice")
     assert unlock_private_key(keystore, PASSWORD) is not None
