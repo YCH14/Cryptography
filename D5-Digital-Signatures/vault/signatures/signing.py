@@ -4,7 +4,7 @@ Flow
 ----
 Sign:    Encrypt (D3) -> add ``signer_id`` and ``container_id`` -> Hash (SHA-256)
          -> Sign (Ed25519) -> Store
-Verify:  Read -> Hash (SHA-256) -> Verify (Ed25519) -> only then Decrypt (D3)
+Verify:  Read -> Hash (SHA-256) -> Verify (Ed25519) -> (replay check) -> only then Decrypt (D3)
 
 What is signed
 --------------
@@ -17,7 +17,11 @@ version, algorithm identifiers, timestamp, filename, ``metadata``,
 ``container_id`` is a random 128-bit identifier (32 lowercase hex characters)
 chosen by the signer for each container.  Because it is signed, two different
 signings of the same content give two different identifiers, and a recipient
-can recognise a container it has already processed.
+can recognise a container it has already processed.  The recipient does that
+with a :class:`~vault.signatures.replay.ReplayGuard`, passed to
+:func:`verify_and_decrypt`: the guard is checked after the signature is
+verified and before decryption, and the container is recorded only after it
+has been decrypted successfully.
 
 Encoding
 --------
@@ -49,6 +53,7 @@ from vault.exceptions import (
 )
 from vault.hybrid.encryption import decrypt_bytes_hybrid
 from vault.signatures.keys import get_signer_id
+from vault.signatures.replay import ReplayGuard
 
 __all__ = ["CONTAINER_ID_SIZE", "sign_container", "verify_and_decrypt"]
 
@@ -120,14 +125,22 @@ def verify_and_decrypt(
     signer_public_key: Ed25519PublicKey,
     recipient_id: Optional[str],
     recipient_private_key: X25519PrivateKey,
+    replay_guard: Optional[ReplayGuard] = None,
 ) -> bytes:
     """Verify the signature first; only if it is valid, decrypt the container.
+
+    If ``replay_guard`` is given, a container that was already accepted is
+    refused (after the signature check, before any decryption), and the
+    container is recorded once it has been decrypted.  Without a guard, replay
+    is not detected.
 
     Raises:
         MissingSignatureError: the container has no signature.
         SignatureVerificationError: the signature is invalid, the container was
             modified, it was signed by a different key, or it has no valid
             ``container_id``.  Nothing is decrypted.
+        ReplayDetectedError: the container was already accepted (needs a guard).
+        ReplayStoreError: the guard's store cannot be read or written.
         DecryptionFailedError: the signature is valid but decryption fails (D3).
     """
     if not isinstance(signer_public_key, Ed25519PublicKey):
@@ -150,7 +163,16 @@ def verify_and_decrypt(
     if not _container_id_is_valid(container.get("container_id")):
         raise SignatureVerificationError()
 
+    signer_id = container["signer_id"]
+    container_id = container["container_id"]
+    if replay_guard is not None:
+        replay_guard.check(signer_id, container_id)
+
     encrypted_only = {k: v for k, v in container.items() if k not in _ADDED_FIELDS}
-    return decrypt_bytes_hybrid(
+    plaintext = decrypt_bytes_hybrid(
         _canonical_json(encrypted_only), recipient_id, recipient_private_key
     )
+
+    if replay_guard is not None:
+        replay_guard.record(signer_id, container_id)
+    return plaintext

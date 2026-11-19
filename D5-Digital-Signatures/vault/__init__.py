@@ -7,6 +7,8 @@ from vault.exceptions import (
     MissingSignatureError,
     PlaintextTooLargeError,
     RecipientNotFoundError,
+    ReplayDetectedError,
+    ReplayStoreError,
     SignatureVerificationError,
     VaultError,
 )
@@ -39,6 +41,8 @@ __all__ = [
     "MissingSignatureError",
     "PlaintextTooLargeError",
     "RecipientNotFoundError",
+    "ReplayDetectedError",
+    "ReplayStoreError",
     "SignatureVerificationError",
     "VaultError",
     "decrypt_bytes",
