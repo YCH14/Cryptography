@@ -14,6 +14,7 @@ from vault.keystore.keystore import (
     restore_keystore,
     unlock_private_key,
 )
+from vault.keystore.trust import TrustedSigners, verify_with_trusted_signers
 
 __all__ = [
     "KEYSTORE_FILES",
@@ -22,8 +23,10 @@ __all__ = [
     "STATUS_REVOKED",
     "KeyEntry",
     "Keyring",
+    "TrustedSigners",
     "backup_keystore",
     "create_keystore",
     "restore_keystore",
     "unlock_private_key",
+    "verify_with_trusted_signers",
 ]

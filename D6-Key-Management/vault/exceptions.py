@@ -28,6 +28,7 @@ __all__ = [
     "MissingSignatureError",
     "KeystoreError",
     "KeystoreAccessError",
+    "UntrustedSignerError",
 ]
 
 _GENERIC_DECRYPTION_MESSAGE = (
@@ -112,3 +113,11 @@ class KeystoreAccessError(KeystoreError):
 
     def __init__(self) -> None:
         super().__init__(_GENERIC_KEYSTORE_MESSAGE)
+
+
+class UntrustedSignerError(SignatureVerificationError):
+    """The container was signed by a key that is unknown or revoked in the trusted signers file.
+
+    Raised before the signature is checked and before any decryption, with the
+    same fixed message as the other verification errors and no chained cause.
+    """
