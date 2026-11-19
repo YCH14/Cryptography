@@ -4,7 +4,7 @@ Private keys are never stored in plaintext. Each private key (the X25519 key of 
 
 - Key management design, lifecycle, threat model alignment and security discussion: [`docs/key_management_d6.md`](docs/key_management_d6.md)
 - Modules: [`vault/keystore/keystore.py`](vault/keystore/keystore.py) (one key), [`vault/keystore/keyring.py`](vault/keystore/keyring.py) (rotation, revocation, historical access), [`vault/keystore/trust.py`](vault/keystore/trust.py) (trusted signing keys)
-- Tests: [`tests/keystore/`](tests/keystore/) (`test_keystore.py`, `test_keyring.py`, `test_revocation.py`, `test_trust.py`)
+- Tests: [`tests/keystore/`](tests/keystore/) (`test_keystore.py`, `test_keyring.py`, `test_revocation.py`, `test_trust.py`, `test_trust_replay.py`)
 
 This folder is self-contained: it includes the D2, D3 and D5 modules it builds on.
 
@@ -14,7 +14,7 @@ D6-Key-Management/
 │   ├── symmetric.py        # D2 module (unchanged)
 │   ├── exceptions.py       # D2/D3/D5 errors + keystore errors, UntrustedSignerError
 │   ├── hybrid/             # D3 module (ECIES with X25519)
-│   ├── signatures/         # D5 module (Ed25519)
+│   ├── signatures/         # D5 module (Ed25519, ReplayGuard: replay and rollback)
 │   └── keystore/
 │       ├── keystore.py     # create_keystore, unlock_private_key, backup_keystore, restore_keystore
 │       ├── keyring.py      # Keyring: rotate, revoke, revocation_notice, decrypt old files
@@ -22,7 +22,7 @@ D6-Key-Management/
 ├── tests/
 │   ├── test_symmetric.py   # D2 suite
 │   ├── hybrid/             # D3 suite
-│   ├── signatures/         # D5 suite
+│   ├── signatures/         # D5 suite (signatures, container_id, replay, rollback)
 │   └── keystore/           # D6: the five required tests, keyring, revocation and trusted signers
 ├── docs/key_management_d6.md
 ├── requirements.txt
@@ -95,6 +95,7 @@ restore_keystore(Path("alice-x25519-backup"), Path("alice-x25519-restored"), "a 
 
 ```python
 from vault.keystore import Keyring, TrustedSigners, verify_with_trusted_signers
+from vault.signatures import ReplayGuard
 
 # A keyring holds every version of one key of one type ("X25519" or "Ed25519").
 keyring = Keyring.create(Path("alice-keyring"), "alice", "X25519")
@@ -120,6 +121,11 @@ trusted = TrustedSigners(Path("trusted_signers.json"))
 trusted.add("alice", alice_public, expected_fingerprint=fingerprint_from_alice)  # confirmed out of band
 trusted.import_revocation(notice_for_alice_signing_key)     # refuses her revoked key from now on
 plaintext = verify_with_trusted_signers(signed, trusted, "bob", bob_private_key)
+
+# With a ReplayGuard (D5) the same container, or an older version of a document, is refused.
+guard = ReplayGuard(Path("bob-replay.json"))
+plaintext = verify_with_trusted_signers(signed, trusted, "bob", bob_private_key, guard)
+# A second call with the same `signed` raises ReplayDetectedError.
 ```
 
 The design, the order of the steps after a compromise and the limits are in [`docs/key_management_d6.md`](docs/key_management_d6.md).

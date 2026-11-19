@@ -60,6 +60,7 @@ from vault.exceptions import (
 from vault.keystore._storage import now_utc, read_json, write_json_atomic
 from vault.keystore.keyring import NOTICE_FORMAT
 from vault.signatures.keys import get_signer_id
+from vault.signatures.replay import ReplayGuard
 from vault.signatures.signing import verify_and_decrypt
 
 __all__ = [
@@ -283,21 +284,32 @@ def verify_with_trusted_signers(
     trusted_signers: TrustedSigners,
     recipient_id: Optional[str],
     recipient_private_key: X25519PrivateKey,
+    replay_guard: Optional[ReplayGuard] = None,
 ) -> bytes:
     """Verify a signed container against the trusted signers, then decrypt it.
 
     The signer is chosen by the ``signer_id`` inside the container, but only among
     the keys the recipient trusts: an unknown or revoked signer is refused before
     anything else, and a trusted one goes through the normal D5 check (signature
-    first, then decryption).
+    first, then the replay check, then decryption).
+
+    If ``replay_guard`` is given, a container that was already accepted, or an
+    older version of a document that was already accepted, is refused, and the
+    container is recorded once it has been decrypted (see D5).  Without a guard,
+    replay and rollback are not detected.
 
     Raises:
         UntrustedSignerError: the signer is unknown or revoked.
         SignatureVerificationError: the container has no ``signer_id``, or the signature is invalid.
+        ReplayDetectedError: the container was already accepted (needs a guard).
+        RollbackDetectedError: an equal or newer version of the document was already accepted (needs a guard).
+        ReplayStoreError: the guard's store cannot be read or written.
         DecryptionFailedError: the signature is valid but decryption fails.
     """
     public_key = trusted_signers.public_key_for(container_bytes)
-    return verify_and_decrypt(container_bytes, public_key, recipient_id, recipient_private_key)
+    return verify_and_decrypt(
+        container_bytes, public_key, recipient_id, recipient_private_key, replay_guard
+    )
 
 
 def _check_name(name: object) -> None:

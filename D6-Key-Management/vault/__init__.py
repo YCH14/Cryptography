@@ -9,6 +9,9 @@ from vault.exceptions import (
     MissingSignatureError,
     PlaintextTooLargeError,
     RecipientNotFoundError,
+    ReplayDetectedError,
+    ReplayStoreError,
+    RollbackDetectedError,
     SignatureVerificationError,
     UntrustedSignerError,
     VaultError,
@@ -35,6 +38,7 @@ from vault.keystore import (
     unlock_private_key,
     verify_with_trusted_signers,
 )
+from vault.signatures import ReplayGuard
 from vault.symmetric import (
     DecryptedDocument,
     decrypt_bytes,
@@ -56,6 +60,10 @@ __all__ = [
     "MissingSignatureError",
     "PlaintextTooLargeError",
     "RecipientNotFoundError",
+    "ReplayDetectedError",
+    "ReplayGuard",
+    "ReplayStoreError",
+    "RollbackDetectedError",
     "SignatureVerificationError",
     "TrustedSigners",
     "UntrustedSignerError",
