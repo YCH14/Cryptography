@@ -61,11 +61,11 @@ python -m venv .venv
 
 ```python
 from vault.exceptions import SignatureVerificationError
-from vault.hybrid import generate_rsa_keypair
+from vault.hybrid import generate_x25519_keypair
 from vault.hybrid.encryption import encrypt_bytes_hybrid
 from vault.signatures import generate_ed25519_keypair, sign_container, verify_and_decrypt
 
-bob = generate_rsa_keypair()
+bob = generate_x25519_keypair()
 alice_private, alice_public = generate_ed25519_keypair()
 
 container = encrypt_bytes_hybrid(b"secret", [("bob", bob.public_key)])
