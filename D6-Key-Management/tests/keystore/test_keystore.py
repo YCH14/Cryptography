@@ -1,19 +1,24 @@
 """D6 required tests: correct password, wrong password, modified keystore,
 backup and restore, and a stolen keystore alone."""
 
+import hashlib
 import json
+import os
 import shutil
 
 import pytest
 from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 
 from vault.exceptions import (
     DecryptionFailedError,
+    InvalidKeyError,
     KeystoreAccessError,
     KeystoreError,
 )
-from vault.hybrid import generate_x25519_keypair
+from vault.hybrid import generate_x25519_keypair, get_public_key_fingerprint
 from vault.hybrid.encryption import decrypt_bytes_hybrid, encrypt_bytes_hybrid
+from vault.keystore import keystore as keystore_module
 from vault.keystore import (
     KEYSTORE_FILES,
     backup_keystore,
@@ -23,6 +28,7 @@ from vault.keystore import (
 )
 from vault.signatures import (
     generate_ed25519_keypair,
+    get_signer_id,
     sign_container,
     verify_and_decrypt,
 )
@@ -195,3 +201,89 @@ def test_existing_keystore_is_never_overwritten(keystore, alice_x25519):
     with pytest.raises(KeystoreError):
         create_keystore(keystore, alice_x25519.private_key, "another password", "alice")
     assert unlock_private_key(keystore, PASSWORD) is not None
+
+
+# 6. Key types: X25519 and Ed25519 only; RSA is not accepted -------------------
+
+
+def _raw_public(public_key) -> bytes:
+    return public_key.public_bytes(
+        serialization.Encoding.Raw, serialization.PublicFormat.Raw
+    )
+
+
+def test_key_id_is_sha256_of_raw_public_key(tmp_path, alice_x25519, alice_ed25519):
+    x25519_path = create_keystore(
+        tmp_path / "x25519", alice_x25519.private_key, PASSWORD, "alice"
+    )
+    ed25519_path = create_keystore(tmp_path / "ed25519", alice_ed25519[0], PASSWORD, "alice")
+
+    x25519_meta = json.loads((x25519_path / "metadata").read_bytes())
+    ed25519_meta = json.loads((ed25519_path / "metadata").read_bytes())
+
+    assert x25519_meta["key_type"] == "X25519"
+    assert x25519_meta["key_id"] == hashlib.sha256(_raw_public(alice_x25519.public_key)).hexdigest()
+    assert x25519_meta["key_id"] == get_public_key_fingerprint(alice_x25519.public_key)
+
+    assert ed25519_meta["key_type"] == "Ed25519"
+    assert ed25519_meta["key_id"] == hashlib.sha256(_raw_public(alice_ed25519[1])).hexdigest()
+    assert ed25519_meta["key_id"] == get_signer_id(alice_ed25519[1])
+
+
+def test_expected_key_type_accepts_the_right_type(keystore):
+    assert unlock_private_key(keystore, PASSWORD, expected_key_type="X25519") is not None
+
+
+def test_rsa_private_key_is_refused(tmp_path):
+    rsa_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    target = tmp_path / "rsa"
+    with pytest.raises(InvalidKeyError):
+        create_keystore(target, rsa_key, PASSWORD, "alice")
+    assert not target.exists()
+
+
+def test_keystore_holding_an_rsa_key_does_not_open(tmp_path):
+    # Build a keystore in the exact on-disk format, but holding an RSA key, as
+    # the previous version of D6 did.  The current code must not open it, even
+    # with the right password.
+    rsa_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    metadata = {
+        "version": keystore_module.FORMAT_VERSION,
+        "owner": "alice",
+        "key_type": "RSA",
+        "key_id": "0" * 64,
+        "created": "2026-01-01T00:00:00Z",
+    }
+    kdf = {
+        "kdf": keystore_module.KDF_NAME,
+        "iterations": keystore_module.ARGON2_ITERATIONS,
+        "lanes": keystore_module.ARGON2_LANES,
+        "memory_cost_kib": keystore_module.ARGON2_MEMORY_KIB,
+        "length": keystore_module.KEY_SIZE,
+    }
+    salt, nonce = os.urandom(16), os.urandom(12)
+    key = keystore_module._derive_key(PASSWORD.encode(), salt, kdf)
+    sealed = keystore_module.AESGCM(key).encrypt(
+        nonce, _der(rsa_key), keystore_module._aad(metadata, kdf, salt)
+    )
+    legacy = tmp_path / "legacy-rsa"
+    legacy.mkdir()
+    (legacy / "encrypted_private_key").write_bytes(nonce + sealed)
+    (legacy / "salt").write_bytes(salt)
+    (legacy / "kdf_parameters").write_bytes(keystore_module._canonical_json(kdf))
+    (legacy / "metadata").write_bytes(keystore_module._canonical_json(metadata))
+
+    with pytest.raises(KeystoreAccessError):
+        unlock_private_key(legacy, PASSWORD)
+
+
+def test_ed25519_backup_restore_works(tmp_path, alice_ed25519):
+    private_key, _ = alice_ed25519
+    original = create_keystore(tmp_path / "ed25519", private_key, PASSWORD, "alice")
+    backup = backup_keystore(original, tmp_path / "ed25519-backup")
+
+    shutil.rmtree(original)
+    restored = restore_keystore(backup, original, PASSWORD)
+
+    unlocked = unlock_private_key(restored, PASSWORD, expected_key_type="Ed25519")
+    assert _der(unlocked) == _der(private_key)
