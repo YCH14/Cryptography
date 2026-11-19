@@ -10,6 +10,7 @@ from vault.exceptions import (
     PlaintextTooLargeError,
     RecipientNotFoundError,
     SignatureVerificationError,
+    UntrustedSignerError,
     VaultError,
 )
 from vault.hybrid import (
@@ -25,10 +26,14 @@ from vault.hybrid import (
     load_public_key_pem,
 )
 from vault.keystore import (
+    KeyEntry,
+    Keyring,
     backup_keystore,
     create_keystore,
+    TrustedSigners,
     restore_keystore,
     unlock_private_key,
+    verify_with_trusted_signers,
 )
 from vault.symmetric import (
     DecryptedDocument,
@@ -44,12 +49,16 @@ __all__ = [
     "DecryptionFailedError",
     "InvalidKeyError",
     "InvalidMetadataError",
+    "KeyEntry",
     "KeystoreAccessError",
     "KeystoreError",
+    "Keyring",
     "MissingSignatureError",
     "PlaintextTooLargeError",
     "RecipientNotFoundError",
     "SignatureVerificationError",
+    "TrustedSigners",
+    "UntrustedSignerError",
     "VaultError",
     "backup_keystore",
     "create_keystore",
@@ -70,5 +79,6 @@ __all__ = [
     "load_public_key_pem",
     "restore_keystore",
     "unlock_private_key",
+    "verify_with_trusted_signers",
 ]
 
