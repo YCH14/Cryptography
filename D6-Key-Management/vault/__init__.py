@@ -25,6 +25,8 @@ from vault.hybrid import (
     load_public_key_pem,
 )
 from vault.keystore import (
+    KeyEntry,
+    Keyring,
     backup_keystore,
     create_keystore,
     restore_keystore,
@@ -44,8 +46,10 @@ __all__ = [
     "DecryptionFailedError",
     "InvalidKeyError",
     "InvalidMetadataError",
+    "KeyEntry",
     "KeystoreAccessError",
     "KeystoreError",
+    "Keyring",
     "MissingSignatureError",
     "PlaintextTooLargeError",
     "RecipientNotFoundError",
