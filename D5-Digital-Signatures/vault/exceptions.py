@@ -26,6 +26,9 @@ __all__ = [
     "RecipientNotFoundError",
     "SignatureVerificationError",
     "MissingSignatureError",
+    "ReplayDetectedError",
+    "RollbackDetectedError",
+    "ReplayStoreError",
 ]
 
 _GENERIC_DECRYPTION_MESSAGE = (
@@ -87,3 +90,28 @@ class SignatureVerificationError(DecryptionFailedError):
 
 class MissingSignatureError(SignatureVerificationError):
     """The container carries no signature, so it is rejected before decryption."""
+
+
+class ReplayDetectedError(SignatureVerificationError):
+    """The same signed container was already accepted by this recipient (replay).
+
+    Raised after the signature is verified and before decryption.  It has the
+    same fixed message as the other verification errors and no chained cause.
+    """
+
+
+class RollbackDetectedError(SignatureVerificationError):
+    """An older (or equal) version of a document was already accepted (rollback).
+
+    Raised when the signed ``document_version`` is not greater than the newest
+    version of the same ``document_id`` that this recipient already accepted
+    from the same signer.  Same fixed message, no chained cause.
+    """
+
+
+class ReplayStoreError(VaultError):
+    """The replay store cannot be read or written (corrupted file, I/O error).
+
+    This is a local failure, not attacker-controlled input, so the message is
+    descriptive.  The container is not accepted when the store is unusable.
+    """
