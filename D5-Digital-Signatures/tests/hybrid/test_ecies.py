@@ -113,7 +113,12 @@ class TestConstructionMatchesDocumentation:
         assert AESGCM(dek).decrypt(nonce, sealed, aad) == PLAINTEXT
 
     def test_container_does_not_mention_rsa(self, alice: X25519KeyPair, bob: X25519KeyPair) -> None:
-        text = json.dumps(_container(alice, bob)).lower()
+        container = _container(alice, bob)
+        # Only the descriptive parts are checked: field names and algorithm names.  The base64
+        # values are random, so a short word such as "rsa" can appear in them by chance.
+        descriptive = [*container, container["magic"], container["algorithm"], container["key_wrap_algorithm"]]
+        descriptive += [name for recipient in container["recipients"] for name in recipient]
+        text = " ".join(descriptive).lower()
         assert "rsa" not in text
         assert "oaep" not in text
 
