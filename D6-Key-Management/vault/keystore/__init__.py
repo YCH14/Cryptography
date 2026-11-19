@@ -3,6 +3,7 @@
 from vault.keystore.keyring import (
     STATUS_ACTIVE,
     STATUS_RETIRED,
+    STATUS_REVOKED,
     KeyEntry,
     Keyring,
 )
@@ -18,6 +19,7 @@ __all__ = [
     "KEYSTORE_FILES",
     "STATUS_ACTIVE",
     "STATUS_RETIRED",
+    "STATUS_REVOKED",
     "KeyEntry",
     "Keyring",
     "backup_keystore",
