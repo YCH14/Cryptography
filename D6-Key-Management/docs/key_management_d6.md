@@ -121,7 +121,8 @@ A revocation does not undo what already happened: an attacker who copied files e
 - *Distribution.* `add(name, public_key, expected_fingerprint=...)` refuses a key whose `signer_id` is not the fingerprint that the signer gave through another channel (in person, by phone, in a signed message).
 - *Replacement.* `replace(old_signer_id, new_public_key, expected_fingerprint=...)` trusts the new key and marks the old one as `superseded`. Containers signed with the old key before the replacement still verify.
 - *Revocation.* `revoke(signer_id, reason)` or `import_revocation(notice)` marks the key as `revoked`. `verify_with_trusted_signers` then refuses every container signed with it (`UntrustedSignerError`), including ones signed before the compromise, because the container's `timestamp` is written by the signer and cannot prove when it was made.
-- A signer that is unknown or revoked is refused before the signature is checked. A trusted one goes through the normal D5 check, signature first and decryption after.
+- A signer that is unknown or revoked is refused before the signature is checked. A trusted one goes through the normal D5 check: signature first, then the replay check if a guard is given, then decryption.
+- *Replay and rollback.* `verify_with_trusted_signers(..., replay_guard=guard)` passes a D5 `ReplayGuard` to the check. A container that was already accepted (`ReplayDetectedError`), or an older version of a document that was already accepted (`RollbackDetectedError`), is refused after the signature is verified and before decryption, and a container is recorded only after it was decrypted. The trust check comes first, so a revoked signer is refused as `UntrustedSignerError` even for a container that was accepted before. Without a guard, replay and rollback are not detected (D1, AS5).
 
 The revocation notice is not signed: a compromised key cannot vouch for its own revocation, so the notice has to reach the recipient through a trusted channel, the same way the key did. A forged notice could otherwise make a recipient stop trusting a valid key.
 
@@ -137,6 +138,7 @@ The revocation notice is not signed: a compromised key cannot vouch for its own 
 - The operating system provides a secure source of randomness (D1, Trust Assumptions).
 - Attackers can read, copy and modify the keystore and its backups, and can guess passwords offline (D1, Attacker Capabilities).
 - Public keys are obtained through a reliable channel (D1, Trust Assumptions).
+- The replay record of the `ReplayGuard` and the trusted signers file are on the recipient's own device, which is assumed to be trusted (D1, AS5 and AS6).
 
 ## Threat Model Alignment (D1)
 
@@ -154,6 +156,7 @@ The revocation notice is not signed: a compromised key cannot vouch for its own 
 | Using an X25519 key to sign or an Ed25519 key to decrypt | Data an attacker copied before a key was rotated |
 | Overwriting an existing keystore by mistake | A revocation notice that arrives through an untrusted channel |
 | Using a revoked or retired key for new work, or accepting files signed by a revoked signer | Someone who can write to the keyring manifest or to the trusted signers file changing a status |
+| A trusted signer's container delivered again, or an older version of a document (with a `ReplayGuard`) | Someone who can delete or edit the replay record, or a recipient that does not use a guard |
 | A corrupted backup being restored | Old backups that still open with an old password |
 
 ## Security Discussion
@@ -197,6 +200,8 @@ Rotation, revocation and the trusted signers have their own tests:
 | `tests/keystore/test_keyring.py` | create and open a keyring; first key active; rotation retires the previous key and keeps one active; each key has its own password; duplicate and wrong-type keys refused; manifest holds no key material; files made before a rotation still open with the retired key |
 | `tests/keystore/test_revocation.py` | revoking active and retired keys; a revoked key is not unlocked unless `allow_revoked=True`, and still needs the password; reason required; no double revocation; notice content; historical `decrypt` after a rotation; the compromised-key flow (revoke, recover, share again) |
 | `tests/keystore/test_trust.py` | key accepted only with a matching fingerprint; unknown and revoked signers refused; replacement keeps old containers valid; revocation, also from the owner's notice; forged signer id fails the signature; generic error; malformed files not ignored |
+| `tests/keystore/test_trust_replay.py` | trusted signer with a `ReplayGuard`: first delivery accepted, replay refused, older document version refused, newer version accepted, record kept between guard objects, unknown or revoked signer refused before the replay check and not recorded, failed decryption or tampering does not use up the container |
+| `tests/signatures/` | the D5 suite, including `test_container_id.py`, `test_replay.py` and `test_rollback.py`, now identical to D5 |
 
 ## Sources
 

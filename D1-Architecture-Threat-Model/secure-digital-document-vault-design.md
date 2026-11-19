@@ -92,7 +92,7 @@ Users need to store and share digital documents securely across untrusted infras
 - **Secure Randomness:** It is assumed that the local operating system provides a cryptographically secure source of entropy (CSPRNG) for generating keys, IVs, and nonces.
 - **Untrusted Central Infrastructure:** It is explicitly assumed that the "UNTRUSTED ENVIRONMENT" (including the network and central storage) is completely compromised and provides no native privacy or data retention guarantees.
 - **Replay and rollback are detected only if the recipient uses a replay guard (AS5):** Every container carries a signed random `container_id`, and a signer may add a signed `document_id` and `document_version`. A recipient that verifies with a `ReplayGuard` (D5) refuses a container it has already accepted (replay) and, for versioned documents, a version that is not newer than the newest one it accepted (rollback). The guard is optional, and its record lives on the recipient's device, which is assumed to be trusted: whoever can delete or edit the record makes the recipient forget. Rollback is detected only after a newer version was accepted, so the storage can still serve an old version first, hide new versions or delay containers (denial of service is out of scope). The signed `timestamp` is not used as proof of freshness, because the signer writes it and no trusted clock is assumed.
-- **Sender authenticity depends on the trusted signer key (AS6):** A valid signature, together with a matching `signer_id`, proves that the package was signed by the holder of a specific Ed25519 key. The `signer_id` is only the SHA-256 fingerprint of that key; it identifies a key, not a person. The software does not decide who owns the key. It is assumed that the recipient obtains the sender's public key through a trusted channel and confirms its fingerprint out of band (C11). If an attacker substitutes that key, the packages signed by the attacker verify correctly. For this reason the "non-repudiation" mentioned in the system overview holds only for the key that was trusted, and there is no certificate authority in this design.
+- **Sender authenticity depends on the trusted signer key (AS6):** A valid signature, together with a matching `signer_id`, proves that the package was signed by the holder of a specific Ed25519 key. The `signer_id` is only the SHA-256 fingerprint of that key; it identifies a key, not a person. The software does not decide who owns the key. It is assumed that the recipient obtains the sender's public key through a trusted channel and confirms its fingerprint out of band (C11). If an attacker substitutes that key, the packages signed by the attacker verify correctly. D6 helps with the bookkeeping (a `TrustedSigners` file accepts a key only if its fingerprint matches the one confirmed out of band, and a signer can be replaced or revoked), but the confirmation itself is still done by people. For this reason the "non-repudiation" mentioned in the system overview holds only for the key that was trusted, and there is no certificate authority in this design.
 
 ## 6. Attack Surface Review
 
@@ -123,7 +123,7 @@ Each constraint is a concrete design decision of the project. "Status" tells whe
 | C7 | Public keys are imported only if they are of the expected type; the key fingerprint is the SHA-256 of the raw public key; recipient IDs may not look like a fingerprint. | Implemented (D3, D5) |
 | C8 | Private keys are stored only in a password-protected Key Store (Argon2id, AES-256-GCM, with the format, KDF parameters, salt and metadata authenticated); the password is not stored and decrypted keys are not cached. | Implemented (D6) |
 | C9 | Replay and rollback detection: every container has a unique, signed `container_id`, and a signer may add a signed `document_id` and `document_version`; the recipient's `ReplayGuard` refuses a container that was already accepted and an equal or older document version. | Implemented (D5); the recipient must use the guard (see AS5) |
-| C10 | Key rotation and revocation workflow for private keys. | Planned |
+| C10 | Key rotation and revocation workflow: a keyring keeps every version of a key (active, retired, revoked), a compromised key is revoked and replaced, old files stay readable through the retired keys, and the recipient keeps a file of trusted signing keys that accepts a key only after its fingerprint is confirmed out of band and can replace or revoke it. | Implemented (D6) |
 | C11 | Public keys of senders and recipients are authentic: they are obtained and confirmed out of band (for example by comparing fingerprints). | Assumption, not enforced by the software |
 
 ### 7.2 Traceability Matrix
@@ -138,7 +138,7 @@ Each row follows one chain: asset → threat → attack scenario → security re
 | A4 | T4 | S4, S5 | SR3, SR5 | C3, C4 |
 | A1, A4 | T5 | S6 | SR2 | C3 (the timestamp is signed), C9 |
 | A1 | T6 | S7 | SR1, SR3 | C7, C11 |
-| A2, A3 | T7 | S8 | SR4 | C8, C10 (planned) |
+| A2, A3 | T7 | S8 | SR4 | C8, C10 |
 | A1 | T8 | S9 | SR2 | C4, C5 |
 | A4 | T9 | S10 | SR5 | C5, C6 |
 | A1, A2 | T10 | S11 | SR1, SR3 | C7 |
