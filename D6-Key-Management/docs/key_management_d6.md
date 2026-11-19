@@ -2,7 +2,7 @@
 
 This deliverable protects the private keys of the vault. A private key is never stored in plaintext: it is encrypted with a key derived from the user's password with **Argon2id**, and kept in a keystore directory with a documented format. It also covers backup and recovery, the key lifecycle, and how this fits the D1 threat model.
 
-The two kinds of private key it protects are the RSA key that unwraps file keys (D3) and the Ed25519 key that signs containers (D5). Each private key has its own keystore.
+The two kinds of private key it protects are the X25519 key that unwraps file keys (D3, ECIES) and the Ed25519 key that signs containers (D5). Each private key has its own keystore. RSA keys are not supported: `create_keystore` refuses them, and a keystore that declares an RSA key (created by an earlier version of this deliverable) does not open. To move to the current version, create a new X25519 keystore and re-share the files that still matter with D3.
 
 ## Key Management Design
 
@@ -44,13 +44,13 @@ keystore/
 | `encrypted_private_key` | `nonce` (12 bytes) followed by the AES-256-GCM ciphertext and its 16-byte tag. The plaintext is the private key as PKCS#8 DER, the format chosen in our key-format document. |
 | `salt` | The 16 random salt bytes, raw. |
 | `kdf_parameters` | JSON: `kdf` (`"argon2id"`), `iterations`, `lanes`, `memory_cost_kib`, `length`. |
-| `metadata` | JSON: `version` (1), `owner`, `key_type` (`"RSA"` or `"Ed25519"`), `key_id`, `created` (UTC time). |
+| `metadata` | JSON: `version` (1), `owner`, `key_type` (`"X25519"` or `"Ed25519"`), `key_id`, `created` (UTC time). |
 
 Both JSON files are written as canonical JSON (sorted keys, compact), the same rule as the D3 container.
 
 **Encryption.** `AES-256-GCM(derived key, nonce, PKCS#8 DER, AAD)`, with a fresh 96-bit random nonce. The AAD is the canonical JSON of the format name (`VKS1`), `metadata`, `kdf_parameters` and the salt. So every file except the ciphertext itself is authenticated: if anyone changes any of the four files, the GCM tag does not verify and the keystore does not open. Inside the keystore the key is a PKCS#8 structure, but the encryption layer is ours (Argon2id plus AES-GCM) and not the PKCS#8 encrypted form, because the assignment asks for explicit `salt` and `kdf_parameters` files.
 
-**Key identity.** `key_id` follows the rule we already use: for RSA, the SHA-256 of the DER SPKI (the D3 fingerprint); for Ed25519, the SHA-256 of the raw 32-byte public key (the D5 `signer_id`). After decrypting, the code recomputes the `key_id` from the private key and rejects the keystore if it differs from `metadata`. `metadata` also records the `key_type`, and `unlock_private_key(..., expected_key_type=...)` refuses a keystore that holds the other type, so an RSA key is only used to decrypt and an Ed25519 key is only used to sign.
+**Key identity.** `key_id` follows one rule for both key types: the SHA-256 of the raw 32-byte public key. For X25519 this is the D3 recipient fingerprint; for Ed25519 it is the D5 `signer_id`. After decrypting, the code recomputes the `key_id` from the private key and rejects the keystore if it differs from `metadata`. `metadata` also records the `key_type`, and `unlock_private_key(..., expected_key_type=...)` refuses a keystore that holds the other type, so an X25519 key is only used to unwrap file keys and an Ed25519 key is only used to sign.
 
 **Files on disk.** Files are created with mode 0600 (on systems that support it). The keystore is built in a temporary directory and renamed into place, and an existing keystore is never overwritten.
 
@@ -77,16 +77,16 @@ The password is never stored, and nothing is kept in a module-level cache: the k
 
 | Stage | Definition | How the system handles it |
 |---|---|---|
-| Generation | A new key pair is created. | `generate_rsa_keypair` (D3, at least 2048 bits) or `generate_ed25519_keypair` (D5), then `create_keystore` right away. The private key is never written anywhere else. The public key and its `key_id` are what gets shared. |
-| Usage | The key is used to decrypt (RSA) or sign (Ed25519). | `unlock_private_key` asks for the password, decrypts the key for this operation only, and the caller drops it afterwards. `expected_key_type` keeps each key to its purpose. |
+| Generation | A new key pair is created. | `generate_x25519_keypair` (D3) or `generate_ed25519_keypair` (D5), then `create_keystore` right away. The private key is never written anywhere else. The public key and its `key_id` are what gets shared. |
+| Usage | The key is used to unwrap file keys (X25519) or sign (Ed25519). | `unlock_private_key` asks for the password, decrypts the key for this operation only, and the caller drops it afterwards. `expected_key_type` keeps each key to its purpose. |
 | Rotation (conceptual) | The key is replaced by a new one, for example on a schedule or after a password change. | Generate a new pair and a new keystore (a new `key_id`). New files are encrypted for, and signed with, the new keys. The old keystore is kept only to open files made before the rotation, or those files are re-shared to the new key with D3. |
 | Compromise response (conceptual) | The key or the keystore, together with the password, is believed to be known to an attacker. | Stop using the key; generate a new pair and a new keystore; tell recipients out of band that the old `key_id` is no longer trusted (this project has no revocation service); re-share the files that still matter with D3; treat signatures made by the old key as untrusted from the time of the suspected compromise. Files the attacker already copied can still be opened with the old key. |
 | Expiration (optional) | A key stops being valid after a date. | Not enforced. `metadata` stores `created`, so a policy can be added later without changing the format. |
 
 ### Access control via keys
 
-- Only the holder of the private key that matches a recipient entry can decrypt. D3 is unchanged: the file key is still wrapped per recipient with RSA-OAEP, and the keystore only protects the RSA private key that opens that wrapping.
-- The identity of a key is the same everywhere: the `key_id` stored in `metadata` is the fingerprint used in the D3 recipient entry (RSA) or the `signer_id` used in D5 (Ed25519), and it is checked after decryption. A keystore cannot hold a key that does not match its own `key_id`.
+- Only the holder of the private key that matches a recipient entry can decrypt. D3 wraps the file key per recipient with ECIES (an ephemeral X25519 key, HKDF-SHA256 and AES-256-GCM), and the keystore only protects the X25519 private key that opens that wrapping.
+- The identity of a key is the same everywhere: the `key_id` stored in `metadata` is the fingerprint used in the D3 recipient entry (X25519) or the `signer_id` used in D5 (Ed25519), both computed the same way, and it is checked after decryption. A keystore cannot hold a key that does not match its own `key_id`.
 
 ### Security assumptions
 
@@ -109,7 +109,7 @@ The password is never stored, and nothing is kept in a module-level cache: the k
 | A stolen keystore or backup without the password | Weak or reused passwords |
 | Any modification of the four keystore files | Malware, keyloggers or memory reading on a running device |
 | Moving the encrypted key into another keystore | A lost password: there is no recovery |
-| Using an RSA key to sign or an Ed25519 key to decrypt | Data an attacker copied before a key was rotated |
+| Using an X25519 key to sign or an Ed25519 key to decrypt | Data an attacker copied before a key was rotated |
 | Overwriting an existing keystore by mistake | Revoking a key: there is no revocation service |
 | A corrupted backup being restored | Old backups that still open with an old password |
 
@@ -128,7 +128,7 @@ The password is never stored, and nothing is kept in a module-level cache: the k
 - There is no revocation service: rotation and compromise response rely on telling recipients out of band.
 - There is no limit on guessing, because the attack is offline; only the cost of Argon2id slows it down.
 - Argon2id needs a `cryptography` build whose OpenSSL supports it; otherwise the library raises `UnsupportedAlgorithm`.
-- One keystore holds one key, so a user with an RSA key and an Ed25519 key has two keystores.
+- One keystore holds one key, so a user with an X25519 key and an Ed25519 key has two keystores.
 
 ## Tests
 
@@ -136,11 +136,13 @@ The password is never stored, and nothing is kept in a module-level cache: the k
 
 | # | Case | Expected result | Tests |
 |---|------|-----------------|-------|
-| 1 | Correct password | Key unlocked, and it decrypts a D3 container (RSA) or signs a D5 container (Ed25519) | `test_correct_password_access_granted`, `test_ed25519_key_works_with_d5`, `test_password_is_asked_when_not_given` |
+| 1 | Correct password | Key unlocked, and it decrypts a D3 container (X25519) or signs a D5 container (Ed25519) | `test_correct_password_access_granted`, `test_ed25519_key_works_with_d5`, `test_password_is_asked_when_not_given` |
 | 2 | Wrong password | `KeystoreAccessError`, no chained cause | `test_wrong_password_denied` |
 | 3 | Modified keystore | `KeystoreAccessError` after changing any of the four files, removing one, or swapping the encrypted key from another keystore | `test_modified_keystore_fails`, `test_encrypted_key_swapped_from_another_keystore_fails` |
 | 4 | Backup, then restore | The restored keystore opens with the password; a corrupted backup is not restored | `test_backup_restore_works`, `test_corrupted_backup_is_not_restored` |
 | 5 | Stolen keystore alone | No file contains the key in the clear; password guesses fail; another key cannot open the shared container | `test_stolen_keystore_alone_cannot_decrypt` |
+
+Further checks cover the key types: `key_id` is the SHA-256 of the raw public key for both types (`test_key_id_is_sha256_of_raw_public_key`), an RSA private key is refused (`test_rsa_private_key_is_refused`), a keystore in the same format that holds an RSA key does not open (`test_keystore_holding_an_rsa_key_does_not_open`), and an Ed25519 keystore survives backup and restore (`test_ed25519_backup_restore_works`).
 
 ## Sources
 

@@ -23,8 +23,8 @@ from vault.exceptions import (
 )
 from vault.hybrid.encryption import decrypt_bytes_hybrid, encrypt_bytes_hybrid
 from vault.hybrid.keys import (
-    RSAKeyPair,
-    generate_rsa_keypair,
+    X25519KeyPair,
+    generate_x25519_keypair,
     get_public_key_fingerprint,
     looks_like_fingerprint,
 )
@@ -33,17 +33,17 @@ PLAINTEXT = b"top secret shared payload"
 
 
 @pytest.fixture(scope="module")
-def alice() -> RSAKeyPair:
-    return generate_rsa_keypair(2048)
+def alice() -> X25519KeyPair:
+    return generate_x25519_keypair()
 
 
 @pytest.fixture(scope="module")
-def bob() -> RSAKeyPair:
-    return generate_rsa_keypair(2048)
+def bob() -> X25519KeyPair:
+    return generate_x25519_keypair()
 
 
 @pytest.fixture(scope="module")
-def container(alice: RSAKeyPair, bob: RSAKeyPair) -> bytes:
+def container(alice: X25519KeyPair, bob: X25519KeyPair) -> bytes:
     return encrypt_bytes_hybrid(
         PLAINTEXT, [("alice", alice.public_key), ("bob", bob.public_key)]
     )
@@ -57,7 +57,7 @@ def _edit(container: bytes, mutate) -> bytes:
 
 class TestEncryptRejectsConfusableIds:
     def test_id_equal_to_another_recipients_fingerprint_is_rejected(
-        self, alice: RSAKeyPair, bob: RSAKeyPair
+        self, alice: X25519KeyPair, bob: X25519KeyPair
     ) -> None:
         bob_fp = get_public_key_fingerprint(bob.public_key)
         with pytest.raises(InvalidKeyError):
@@ -65,12 +65,12 @@ class TestEncryptRejectsConfusableIds:
                 PLAINTEXT, [(bob_fp, alice.public_key), ("bob", bob.public_key)]
             )
 
-    def test_any_fingerprint_shaped_id_is_rejected(self, alice: RSAKeyPair) -> None:
+    def test_any_fingerprint_shaped_id_is_rejected(self, alice: X25519KeyPair) -> None:
         with pytest.raises(InvalidKeyError):
             encrypt_bytes_hybrid(PLAINTEXT, [("f" * 64, alice.public_key)])
 
     def test_uppercase_hex_is_not_reserved_and_stays_a_plain_id(
-        self, alice: RSAKeyPair
+        self, alice: X25519KeyPair
     ) -> None:
         # Fingerprints are lowercase; 64 uppercase hex chars is just an ordinary ID.
         rid = "F" * 64
@@ -86,8 +86,8 @@ class TestDeterministicLookup:
         who: str,
         selector: str,
         container: bytes,
-        alice: RSAKeyPair,
-        bob: RSAKeyPair,
+        alice: X25519KeyPair,
+        bob: X25519KeyPair,
     ) -> None:
         keys = {"alice": alice, "bob": bob}[who]
         rid = {
@@ -99,7 +99,7 @@ class TestDeterministicLookup:
         assert decrypt_bytes_hybrid(container, rid, keys.private_key) == PLAINTEXT
 
     def test_unknown_id_has_no_fallback_to_the_callers_fingerprint(
-        self, container: bytes, bob: RSAKeyPair
+        self, container: bytes, bob: X25519KeyPair
     ) -> None:
         # Bob IS a recipient, but naming a non-existent ID must not silently
         # fall back to his key fingerprint.
@@ -107,21 +107,21 @@ class TestDeterministicLookup:
             decrypt_bytes_hybrid(container, "zed", bob.private_key)
 
     def test_id_of_another_recipient_with_my_key_fails(
-        self, container: bytes, bob: RSAKeyPair
+        self, container: bytes, bob: X25519KeyPair
     ) -> None:
         with pytest.raises(DecryptionFailedError) as info:
             decrypt_bytes_hybrid(container, "alice", bob.private_key)
         assert not isinstance(info.value, RecipientNotFoundError)
 
     def test_fingerprint_of_another_recipient_with_my_key_fails(
-        self, container: bytes, alice: RSAKeyPair, bob: RSAKeyPair
+        self, container: bytes, alice: X25519KeyPair, bob: X25519KeyPair
     ) -> None:
         alice_fp = get_public_key_fingerprint(alice.public_key)
         with pytest.raises(DecryptionFailedError):
             decrypt_bytes_hybrid(container, alice_fp, bob.private_key)
 
     def test_uppercase_fingerprint_is_treated_as_an_id_not_found(
-        self, container: bytes, alice: RSAKeyPair
+        self, container: bytes, alice: X25519KeyPair
     ) -> None:
         upper = get_public_key_fingerprint(alice.public_key).upper()
         with pytest.raises(RecipientNotFoundError):
@@ -132,7 +132,7 @@ class TestContainerNamespaceIsEnforcedOnRead:
     """A hand-crafted container can never re-introduce the ambiguity."""
 
     def test_entry_with_fingerprint_shaped_id_is_rejected(
-        self, container: bytes, alice: RSAKeyPair, bob: RSAKeyPair
+        self, container: bytes, alice: X25519KeyPair, bob: X25519KeyPair
     ) -> None:
         bob_fp = get_public_key_fingerprint(bob.public_key)
         crafted = _edit(container, lambda d: d["recipients"][0].__setitem__("id", bob_fp))
@@ -141,7 +141,7 @@ class TestContainerNamespaceIsEnforcedOnRead:
                 decrypt_bytes_hybrid(crafted, rid, keys.private_key)
 
     def test_duplicate_fingerprints_are_rejected(
-        self, container: bytes, alice: RSAKeyPair
+        self, container: bytes, alice: X25519KeyPair
     ) -> None:
         def dup(d: dict) -> None:
             d["recipients"][1]["fingerprint"] = d["recipients"][0]["fingerprint"]
@@ -152,7 +152,7 @@ class TestContainerNamespaceIsEnforcedOnRead:
 
     @pytest.mark.parametrize("bad_fp", ["", "xyz", "A" * 64, "a" * 63])
     def test_malformed_fingerprint_field_is_rejected(
-        self, container: bytes, alice: RSAKeyPair, bad_fp: str
+        self, container: bytes, alice: X25519KeyPair, bad_fp: str
     ) -> None:
         crafted = _edit(
             container, lambda d: d["recipients"][1].__setitem__("fingerprint", bad_fp)

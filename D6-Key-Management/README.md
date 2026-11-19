@@ -1,6 +1,6 @@
 # D6 – Key Management
 
-Private keys are never stored in plaintext. Each private key (the RSA key of D3 or the Ed25519 key of D5) is encrypted with **AES-256-GCM** under a key derived from the user's password with **Argon2id**, and stored in a keystore directory. The password is asked when the key is needed, and nothing is cached. The keystore can be backed up and restored.
+Private keys are never stored in plaintext. Each private key (the X25519 key of D3 or the Ed25519 key of D5) is encrypted with **AES-256-GCM** under a key derived from the user's password with **Argon2id**, and stored in a keystore directory. The password is asked when the key is needed, and nothing is cached. The keystore can be backed up and restored. RSA keys are not supported: they are refused when a keystore is created, and a keystore from an earlier version that holds an RSA key does not open (create a new X25519 keystore instead).
 
 - Key management design, lifecycle, threat model alignment and security discussion: [`docs/key_management_d6.md`](docs/key_management_d6.md)
 - Module: [`vault/keystore/keystore.py`](vault/keystore/keystore.py)
@@ -13,8 +13,8 @@ D6-Key-Management/
 ├── vault/
 │   ├── symmetric.py        # D2 module (unchanged)
 │   ├── exceptions.py       # D2/D3/D5 errors + KeystoreError, KeystoreAccessError
-│   ├── hybrid/             # D3 module (unchanged)
-│   ├── signatures/         # D5 module (unchanged)
+│   ├── hybrid/             # D3 module (ECIES with X25519)
+│   ├── signatures/         # D5 module (Ed25519)
 │   └── keystore/
 │       └── keystore.py     # create_keystore, unlock_private_key, backup_keystore, restore_keystore
 ├── tests/
@@ -62,7 +62,7 @@ python -m venv .venv
 from pathlib import Path
 
 from vault.exceptions import KeystoreAccessError
-from vault.hybrid import generate_rsa_keypair
+from vault.hybrid import generate_x25519_keypair
 from vault.keystore import (
     backup_keystore,
     create_keystore,
@@ -70,21 +70,21 @@ from vault.keystore import (
     unlock_private_key,
 )
 
-keys = generate_rsa_keypair()
+keys = generate_x25519_keypair()
 
 # Encrypt the private key under a password and store it.
-create_keystore(Path("alice-rsa"), keys.private_key, "a long passphrase", owner="alice")
+create_keystore(Path("alice-x25519"), keys.private_key, "a long passphrase", owner="alice")
 
 # Unlock it only when needed (the password is asked with getpass if omitted).
-private_key = unlock_private_key(Path("alice-rsa"), "a long passphrase", expected_key_type="RSA")
+private_key = unlock_private_key(Path("alice-x25519"), "a long passphrase", expected_key_type="X25519")
 
 # A wrong password, or a modified keystore, is refused.
 try:
-    unlock_private_key(Path("alice-rsa"), "wrong password")
+    unlock_private_key(Path("alice-x25519"), "wrong password")
 except KeystoreAccessError:
     print("denied")
 
 # Back up the encrypted key and restore it (the password is checked on restore).
-backup_keystore(Path("alice-rsa"), Path("alice-rsa-backup"))
-restore_keystore(Path("alice-rsa-backup"), Path("alice-rsa-restored"), "a long passphrase")
+backup_keystore(Path("alice-x25519"), Path("alice-x25519-backup"))
+restore_keystore(Path("alice-x25519-backup"), Path("alice-x25519-restored"), "a long passphrase")
 ```

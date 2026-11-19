@@ -31,7 +31,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PrivateKey,
     Ed25519PublicKey,
 )
-from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 
 from vault.exceptions import (
     InvalidKeyError,
@@ -96,7 +96,7 @@ def verify_and_decrypt(
     container_bytes: bytes,
     signer_public_key: Ed25519PublicKey,
     recipient_id: Optional[str],
-    recipient_private_key: RSAPrivateKey,
+    recipient_private_key: X25519PrivateKey,
 ) -> bytes:
     """Verify the signature first; only if it is valid, decrypt the container.
 
