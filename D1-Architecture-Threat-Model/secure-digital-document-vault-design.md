@@ -91,7 +91,7 @@ Users need to store and share digital documents securely across untrusted infras
 - **Authentic Public Keys:** It is assumed that the process where the application obtains the "recipient public key" uses a secure and reliable mechanism to prevent identity spoofing.
 - **Secure Randomness:** It is assumed that the local operating system provides a cryptographically secure source of entropy (CSPRNG) for generating keys, IVs, and nonces.
 - **Untrusted Central Infrastructure:** It is explicitly assumed that the "UNTRUSTED ENVIRONMENT" (including the network and central storage) is completely compromised and provides no native privacy or data retention guarantees.
-- **Replay and rollback are not detected (AS5):** The container carries a signed `timestamp`, but the recipient's software does not check its freshness and does not remember the containers it has already processed. A valid package that is delivered twice, or an older valid version served by the storage, is therefore accepted as authentic. The signature proves that the package was created by the holder of the signing key at some point in time; it does not prove that it is the latest or the first delivery. Until the planned mitigation (C9: a unique signed identifier checked by the recipient) exists, it is assumed that the recipient decides whether a package is current by other means, for example by reading the signed `timestamp`.
+- **Replay and rollback are detected only if the recipient uses a replay guard (AS5):** Every container carries a signed random `container_id`, and a signer may add a signed `document_id` and `document_version`. A recipient that verifies with a `ReplayGuard` (D5) refuses a container it has already accepted (replay) and, for versioned documents, a version that is not newer than the newest one it accepted (rollback). The guard is optional, and its record lives on the recipient's device, which is assumed to be trusted: whoever can delete or edit the record makes the recipient forget. Rollback is detected only after a newer version was accepted, so the storage can still serve an old version first, hide new versions or delay containers (denial of service is out of scope). The signed `timestamp` is not used as proof of freshness, because the signer writes it and no trusted clock is assumed.
 - **Sender authenticity depends on the trusted signer key (AS6):** A valid signature, together with a matching `signer_id`, proves that the package was signed by the holder of a specific Ed25519 key. The `signer_id` is only the SHA-256 fingerprint of that key; it identifies a key, not a person. The software does not decide who owns the key. It is assumed that the recipient obtains the sender's public key through a trusted channel and confirms its fingerprint out of band (C11). If an attacker substitutes that key, the packages signed by the attacker verify correctly. For this reason the "non-repudiation" mentioned in the system overview holds only for the key that was trusted, and there is no certificate authority in this design.
 
 ## 6. Attack Surface Review
@@ -99,7 +99,7 @@ Users need to store and share digital documents securely across untrusted infras
 | Entry Point / Interface | What could go wrong? | Security Property at Risk | Design Constraint |
 |---|---|---|---|
 | CLI / Application Input | Malformed inputs when selecting a file ("Select file"), resulting in buffer overflow vulnerabilities. | System Integrity | Strict validation of paths and inputs in the application code. |
-| Package Retrieval (Read Ciphertext) | The storage delivers an old or corrupted package to the "TRUSTED: RECIPIENT" (Replay attack). | Data Integrity / Freshness | The timestamp is signed, but freshness is not validated yet. Planned: a unique signed container identifier checked by the recipient (C9). Until then see assumption AS5. |
+| Package Retrieval (Read Ciphertext) | The storage delivers an old or corrupted package to the "TRUSTED: RECIPIENT" (Replay attack). | Data Integrity / Freshness | Every container has a signed `container_id`, and versioned documents a signed `document_version`; the recipient's `ReplayGuard` (D5) refuses a repeated container and an older version (C9). The guard is optional and has the limits described in assumption AS5. |
 | Key Store Access | Brute-force attacks against the "protected private key reference." | Key Confidentiality | Use of robust key derivation functions (e.g., Argon2id) and strong passwords. |
 | Signature Verification (Step 5) | An attacker separates the signature from a valid document and attaches it to a malicious one, causing the receiver to accept it. | Authenticity / Non-repudiation | The digital signature must be calculated over the entire package and its intrinsic metadata. |
 | Package parsing (container JSON) | Hostile container: duplicate keys, extra or missing fields, invalid base64, very large fields, deep nesting. | System Integrity / Availability | The parser accepts only the exact set of fields, rejects duplicate keys and non-canonical base64, enforces size limits, and reports every failure with one generic error. |
@@ -122,7 +122,7 @@ Each constraint is a concrete design decision of the project. "Status" tells whe
 | C6 | `filename` is untrusted: it is never used to build an output path. | Implemented (D3) |
 | C7 | Public keys are imported only if they are of the expected type; the key fingerprint is the SHA-256 of the raw public key; recipient IDs may not look like a fingerprint. | Implemented (D3, D5) |
 | C8 | Private keys are stored only in a password-protected Key Store (Argon2id, AES-256-GCM, with the format, KDF parameters, salt and metadata authenticated); the password is not stored and decrypted keys are not cached. | Implemented (D6) |
-| C9 | Replay and rollback detection: a unique, signed container identifier checked by the recipient. | Planned |
+| C9 | Replay and rollback detection: every container has a unique, signed `container_id`, and a signer may add a signed `document_id` and `document_version`; the recipient's `ReplayGuard` refuses a container that was already accepted and an equal or older document version. | Implemented (D5); the recipient must use the guard (see AS5) |
 | C10 | Key rotation and revocation workflow for private keys. | Planned |
 | C11 | Public keys of senders and recipients are authentic: they are obtained and confirmed out of band (for example by comparing fingerprints). | Assumption, not enforced by the software |
 
@@ -136,7 +136,7 @@ Each row follows one chain: asset → threat → attack scenario → security re
 | A1, A4 | T2 | S2 | SR2 | C1, C3, C4 |
 | A4 | T3 | S3 | SR2, SR5 | C2, C3 |
 | A4 | T4 | S4, S5 | SR3, SR5 | C3, C4 |
-| A1, A4 | T5 | S6 | SR2 | C3 (the timestamp is signed), C9 (planned) |
+| A1, A4 | T5 | S6 | SR2 | C3 (the timestamp is signed), C9 |
 | A1 | T6 | S7 | SR1, SR3 | C7, C11 |
 | A2, A3 | T7 | S8 | SR4 | C8, C10 (planned) |
 | A1 | T8 | S9 | SR2 | C4, C5 |
