@@ -12,7 +12,7 @@ receiving side **Read → Hash → Verify → Decrypt**.
 ### Algorithm
 
 **Ed25519** (RFC 8032), using the `cryptography` library. The signer has an
-Ed25519 key pair, separate from the RSA keys used to wrap the file key in D3.
+Ed25519 key pair, separate from the X25519 keys used to wrap the file key in D3 (ECIES).
 
 ### Container
 
@@ -38,7 +38,7 @@ rules as D3) of the whole container **except the `signature` field**. This
 covers:
 
 - the encrypted content from D2/D3: `ciphertext`, `tag` and `nonce`;
-- the D3 structure: the `recipients` list (`id`, `fingerprint`, `encrypted_dek`);
+- the D3 structure: the `recipients` list (`id`, `fingerprint`, `ephemeral_public_key`, `encrypted_dek`);
 - all the security-relevant metadata that is also bound as AAD: `magic`,
   `version`, `algorithm`, `key_wrap_algorithm`, `timestamp`, `filename` and
   `metadata`;
@@ -94,7 +94,7 @@ and recipients, the same data bound as AAD in D3.
 
 ## Tests
 
-`tests/signatures/test_signatures.py` covers the five required cases:
+`tests/signatures/test_signatures.py` covers the five required cases plus one check for the ECIES ephemeral key:
 
 | # | Case | Expected result |
 |---|------|-----------------|
@@ -103,3 +103,4 @@ and recipients, the same data bound as AAD in D3.
 | 3 | Modified metadata | rejected (`SignatureVerificationError`) |
 | 4 | Wrong public key | rejected (`SignatureVerificationError`) |
 | 5 | Signature removed | rejected (`MissingSignatureError`) |
+| 6 | Modified ECIES ephemeral public key of a recipient | rejected (`SignatureVerificationError`) |
