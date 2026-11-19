@@ -79,9 +79,51 @@ The password is never stored, and nothing is kept in a module-level cache: the k
 |---|---|---|
 | Generation | A new key pair is created. | `generate_x25519_keypair` (D3) or `generate_ed25519_keypair` (D5), then `create_keystore` right away. The private key is never written anywhere else. The public key and its `key_id` are what gets shared. |
 | Usage | The key is used to unwrap file keys (X25519) or sign (Ed25519). | `unlock_private_key` asks for the password, decrypts the key for this operation only, and the caller drops it afterwards. `expected_key_type` keeps each key to its purpose. |
-| Rotation (conceptual) | The key is replaced by a new one, for example on a schedule or after a password change. | Generate a new pair and a new keystore (a new `key_id`). New files are encrypted for, and signed with, the new keys. The old keystore is kept only to open files made before the rotation, or those files are re-shared to the new key with D3. |
-| Compromise response (conceptual) | The key or the keystore, together with the password, is believed to be known to an attacker. | Stop using the key; generate a new pair and a new keystore; tell recipients out of band that the old `key_id` is no longer trusted (this project has no revocation service); re-share the files that still matter with D3; treat signatures made by the old key as untrusted from the time of the suspected compromise. Files the attacker already copied can still be opened with the old key. |
+| Rotation | The key is replaced by a new one, for example on a schedule or after a password change. | `Keyring.rotate` stores the new key in its own keystore (a new `key_id`), makes it the active key and retires the previous one. New files are encrypted for, and signed with, the new key. The retired key stays in the keyring so files made before the rotation can still be opened. See "Rotation, revocation and historical access". |
+| Revocation and compromise response | The key, or the keystore together with the password, is believed to be known to an attacker, or the key must not be used any more. | `Keyring.revoke` marks the key as revoked, with a date and a reason (and `compromised=True` when it may be known to someone else). The key is never used for new work. The owner rotates, sends the revocation notice to the people who trusted the key, and recovers the files that still matter to share them again with the new key. See the same section. |
 | Expiration (optional) | A key stops being valid after a date. | Not enforced. `metadata` stores `created`, so a policy can be added later without changing the format. |
+
+### Rotation, revocation and historical access
+
+Each key keeps its own keystore, exactly as described above. A **keyring** groups the versions of one key of one type (X25519 for D3, or Ed25519 for D5) for one user:
+
+```text
+keyring/
+ ├── keyring.json        manifest: owner, key type, and for each key: key_id, status, dates, reason
+ └── keys/
+      ├── <key_id>/      a keystore (encrypted_private_key, salt, kdf_parameters, metadata)
+      └── <key_id>/
+```
+
+The manifest holds only public facts. Each keystore can have its own password, so a rotation can also change the password.
+
+| Status | Meaning | New work (sign, receive) | Opening old files |
+|---|---|---|---|
+| `active` | The current key. There is at most one. | Yes | Yes |
+| `retired` | Replaced by a newer key with `Keyring.rotate`. | No | Yes |
+| `revoked` | Declared unusable with `Keyring.revoke`. | No | Only if the owner asks explicitly (`allow_revoked=True`) |
+
+**Rotation.** `rotate(new_key, password)` creates the keystore of the new key, marks it `active` and retires the previous active key. Files that already exist are not touched: they stay encrypted for the old key, which is still in the keyring.
+
+**Historical access.** A D3 container lists the fingerprint of every recipient key, and the fingerprint is the `key_id`. `find_key_for_container` looks up which key of the keyring a container was made for, and `decrypt` opens it with that key, whether it is the active key or a retired one. A key that was rotated away therefore keeps opening the files made before the rotation, and the new key does not need to know about them.
+
+**Responding to a compromised key.** The steps are in this order:
+
+1. `revoke(key_id, reason, compromised=True)`. The key is not used for new work from now on, and `unlock` refuses it unless the owner says `allow_revoked=True`.
+2. `rotate(new_key, password)` to get a new active key.
+3. Send `revocation_notice(key_id)` to the people who trusted the key, through a trusted channel (see below).
+4. Recover the files that still matter with `decrypt(..., allow_revoked=True)` and share them again with the new key with D3. The old key is kept only for this recovery.
+
+A revocation does not undo what already happened: an attacker who copied files encrypted for a compromised key can still open them. What it does is stop the owner, and the recipients who received the notice, from using or trusting that key again.
+
+**Trusted signing keys of other people.** D5 verifies with the public key the caller provides, and the `signer_id` only identifies a key. `TrustedSigners` is the recipient's own file of the signing keys it decided to trust:
+
+- *Distribution.* `add(name, public_key, expected_fingerprint=...)` refuses a key whose `signer_id` is not the fingerprint that the signer gave through another channel (in person, by phone, in a signed message).
+- *Replacement.* `replace(old_signer_id, new_public_key, expected_fingerprint=...)` trusts the new key and marks the old one as `superseded`. Containers signed with the old key before the replacement still verify.
+- *Revocation.* `revoke(signer_id, reason)` or `import_revocation(notice)` marks the key as `revoked`. `verify_with_trusted_signers` then refuses every container signed with it (`UntrustedSignerError`), including ones signed before the compromise, because the container's `timestamp` is written by the signer and cannot prove when it was made.
+- A signer that is unknown or revoked is refused before the signature is checked. A trusted one goes through the normal D5 check, signature first and decryption after.
+
+The revocation notice is not signed: a compromised key cannot vouch for its own revocation, so the notice has to reach the recipient through a trusted channel, the same way the key did. A forged notice could otherwise make a recipient stop trusting a valid key.
 
 ### Access control via keys
 
@@ -110,7 +152,8 @@ The password is never stored, and nothing is kept in a module-level cache: the k
 | Any modification of the four keystore files | Malware, keyloggers or memory reading on a running device |
 | Moving the encrypted key into another keystore | A lost password: there is no recovery |
 | Using an X25519 key to sign or an Ed25519 key to decrypt | Data an attacker copied before a key was rotated |
-| Overwriting an existing keystore by mistake | Revoking a key: there is no revocation service |
+| Overwriting an existing keystore by mistake | A revocation notice that arrives through an untrusted channel |
+| Using a revoked or retired key for new work, or accepting files signed by a revoked signer | Someone who can write to the keyring manifest or to the trusted signers file changing a status |
 | A corrupted backup being restored | Old backups that still open with an old password |
 
 ## Security Discussion
@@ -125,10 +168,12 @@ The password is never stored, and nothing is kept in a module-level cache: the k
 - A password that is lost cannot be recovered, and there is no escrow.
 - Python cannot reliably wipe memory, so the decrypted key and the password stay in memory until they are freed.
 - A compromised device defeats the keystore (D1 assumption).
-- There is no revocation service: rotation and compromise response rely on telling recipients out of band.
+- Revocation is local, plus a notice that the owner sends through a trusted channel. There is no revocation service, no signed or timestamped revocation list, and no way to know that a recipient received the notice.
+- The keyring manifest and the trusted signers file are plain JSON on the device. Someone who can write to them can change a status (for example, mark a revoked key as active again) but cannot read or use a key without its password. The statuses are checks made by this software, not a cryptographic barrier.
+- A revoked key is kept (so files can be recovered) and is as exposed as before: the revocation does not protect files an attacker already copied.
 - There is no limit on guessing, because the attack is offline; only the cost of Argon2id slows it down.
 - Argon2id needs a `cryptography` build whose OpenSSL supports it; otherwise the library raises `UnsupportedAlgorithm`.
-- One keystore holds one key, so a user with an X25519 key and an Ed25519 key has two keystores.
+- One keystore holds one key, so a user with an X25519 key and an Ed25519 key has two keyrings (and every rotation adds a keystore).
 
 ## Tests
 
@@ -143,6 +188,15 @@ The password is never stored, and nothing is kept in a module-level cache: the k
 | 5 | Stolen keystore alone | No file contains the key in the clear; password guesses fail; another key cannot open the shared container | `test_stolen_keystore_alone_cannot_decrypt` |
 
 Further checks cover the key types: `key_id` is the SHA-256 of the raw public key for both types (`test_key_id_is_sha256_of_raw_public_key`), an RSA private key is refused (`test_rsa_private_key_is_refused`), a keystore in the same format that holds an RSA key does not open (`test_keystore_holding_an_rsa_key_does_not_open`), and an Ed25519 keystore survives backup and restore (`test_ed25519_backup_restore_works`).
+
+
+Rotation, revocation and the trusted signers have their own tests:
+
+| File | Cases |
+|------|-------|
+| `tests/keystore/test_keyring.py` | create and open a keyring; first key active; rotation retires the previous key and keeps one active; each key has its own password; duplicate and wrong-type keys refused; manifest holds no key material; files made before a rotation still open with the retired key |
+| `tests/keystore/test_revocation.py` | revoking active and retired keys; a revoked key is not unlocked unless `allow_revoked=True`, and still needs the password; reason required; no double revocation; notice content; historical `decrypt` after a rotation; the compromised-key flow (revoke, recover, share again) |
+| `tests/keystore/test_trust.py` | key accepted only with a matching fingerprint; unknown and revoked signers refused; replacement keeps old containers valid; revocation, also from the owner's notice; forged signer id fails the signature; generic error; malformed files not ignored |
 
 ## Sources
 
