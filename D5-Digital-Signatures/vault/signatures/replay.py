@@ -3,13 +3,16 @@
 A signature proves who created a container, not that it is the first time the
 recipient sees it.  :class:`ReplayGuard` is the recipient's memory of the
 containers it has already accepted: for every signer it keeps the
-``container_id`` values (see :mod:`vault.signatures.signing`) it decrypted.
+``container_id`` values (see :mod:`vault.signatures.signing`) it decrypted,
+and the highest ``document_version`` accepted for each ``document_id``.
 
 Store
 -----
 One JSON file::
 
-    {"format": "VRG1", "containers": {"<signer_id>": ["<container_id>", ...]}}
+    {"format": "VRG1",
+     "containers": {"<signer_id>": ["<container_id>", ...]},
+     "documents": {"<signer_id>": {"<document_id>": <highest version>}}}
 
 The file is written atomically (temporary file in the same directory, then
 ``os.replace``) with permissions ``0600``.  It must live on the recipient's
@@ -29,9 +32,9 @@ import os
 import re
 import tempfile
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, Optional
 
-from vault.exceptions import ReplayDetectedError, ReplayStoreError
+from vault.exceptions import ReplayDetectedError, ReplayStoreError, RollbackDetectedError
 
 __all__ = ["ReplayGuard", "STORE_FORMAT"]
 
@@ -58,17 +61,36 @@ class ReplayGuard:
     def path(self) -> Path:
         return self._path
 
-    def check(self, signer_id: str, container_id: str) -> None:
-        """Raise :class:`ReplayDetectedError` if this container was already accepted.
+    def check(
+        self,
+        signer_id: str,
+        container_id: str,
+        document_id: Optional[str] = None,
+        document_version: Optional[int] = None,
+    ) -> None:
+        """Refuse a container that was already accepted or that is an older version.
 
         Raises:
+            ReplayDetectedError: this ``container_id`` was already accepted.
+            RollbackDetectedError: ``document_version`` is not higher than the
+                highest version of ``document_id`` already accepted from this signer.
             ReplayStoreError: the store exists but cannot be read or is malformed.
         """
         state = self._load()
         if container_id in state["containers"].get(signer_id, []):
             raise ReplayDetectedError()
+        if document_id is not None:
+            newest = state["documents"].get(signer_id, {}).get(document_id)
+            if newest is not None and document_version <= newest:
+                raise RollbackDetectedError()
 
-    def record(self, signer_id: str, container_id: str) -> None:
+    def record(
+        self,
+        signer_id: str,
+        container_id: str,
+        document_id: Optional[str] = None,
+        document_version: Optional[int] = None,
+    ) -> None:
         """Remember that this container was accepted.
 
         Raises:
@@ -78,6 +100,9 @@ class ReplayGuard:
         seen = state["containers"].setdefault(signer_id, [])
         if container_id not in seen:
             seen.append(container_id)
+        if document_id is not None:
+            versions = state["documents"].setdefault(signer_id, {})
+            versions[document_id] = max(document_version, versions.get(document_id, 0))
         self._save(state)
 
     # ------------------------------------------------------------------ #
@@ -87,7 +112,7 @@ class ReplayGuard:
             with open(self._path, "rb") as handle:
                 data = handle.read(_MAX_STORE_SIZE + 1)
         except FileNotFoundError:
-            return {"format": STORE_FORMAT, "containers": {}}
+            return {"format": STORE_FORMAT, "containers": {}, "documents": {}}
         except OSError:
             raise ReplayStoreError("the replay store cannot be read") from None
         state = _parse(data)
@@ -136,13 +161,23 @@ def _parse(data: bytes) -> Any:
         state = json.loads(data)
     except (ValueError, UnicodeDecodeError):
         return None
-    if not isinstance(state, dict) or set(state) != {"format", "containers"}:
+    if not isinstance(state, dict) or set(state) != {"format", "containers", "documents"}:
         return None
-    if state["format"] != STORE_FORMAT or not isinstance(state["containers"], dict):
+    if (
+        state["format"] != STORE_FORMAT
+        or not isinstance(state["containers"], dict)
+        or not isinstance(state["documents"], dict)
+    ):
         return None
     for signer_id, ids in state["containers"].items():
         if not _SIGNER_ID_RE.fullmatch(signer_id) or not isinstance(ids, list):
             return None
         if not all(isinstance(i, str) and _CONTAINER_ID_RE.fullmatch(i) for i in ids):
             return None
+    for signer_id, versions in state["documents"].items():
+        if not _SIGNER_ID_RE.fullmatch(signer_id) or not isinstance(versions, dict):
+            return None
+        for name, version in versions.items():
+            if not isinstance(name, str) or type(version) is not int or version < 1:
+                return None
     return state

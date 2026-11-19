@@ -9,6 +9,7 @@ from vault.exceptions import (
     RecipientNotFoundError,
     ReplayDetectedError,
     ReplayStoreError,
+    RollbackDetectedError,
     SignatureVerificationError,
     VaultError,
 )
@@ -43,6 +44,7 @@ __all__ = [
     "RecipientNotFoundError",
     "ReplayDetectedError",
     "ReplayStoreError",
+    "RollbackDetectedError",
     "SignatureVerificationError",
     "VaultError",
     "decrypt_bytes",

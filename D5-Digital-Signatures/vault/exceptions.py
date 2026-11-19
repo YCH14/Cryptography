@@ -27,6 +27,7 @@ __all__ = [
     "SignatureVerificationError",
     "MissingSignatureError",
     "ReplayDetectedError",
+    "RollbackDetectedError",
     "ReplayStoreError",
 ]
 
@@ -96,6 +97,15 @@ class ReplayDetectedError(SignatureVerificationError):
 
     Raised after the signature is verified and before decryption.  It has the
     same fixed message as the other verification errors and no chained cause.
+    """
+
+
+class RollbackDetectedError(SignatureVerificationError):
+    """An older (or equal) version of a document was already accepted (rollback).
+
+    Raised when the signed ``document_version`` is not greater than the newest
+    version of the same ``document_id`` that this recipient already accepted
+    from the same signer.  Same fixed message, no chained cause.
     """
 
 
