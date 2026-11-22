@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import stat
 from pathlib import Path
 from typing import Final, NamedTuple, Optional, Union
 
@@ -44,9 +45,28 @@ __all__ = [
     "save_private_key",
     "load_public_key",
     "load_private_key",
+    "KEY_FILE_SUFFIX",
+    "MAX_KEY_FILE_SIZE",
+    "check_pem_block",
+    "read_key_file",
+    "write_key_file",
 ]
 
 _FINGERPRINT_RE: Final[re.Pattern[str]] = re.compile(r"[0-9a-f]{64}")
+
+KEY_FILE_SUFFIX: Final[str] = ".pem"
+"""The only extension accepted for a key file.  It is a guard against mistakes, not a security
+boundary (any file can be renamed): the real checks are the ones in :func:`check_pem_block`."""
+
+MAX_KEY_FILE_SIZE: Final[int] = 16 * 1024
+"""A key file larger than this is refused without being read in full (a PEM key is under 1 KiB)."""
+
+_PUBLIC_LABELS: Final[tuple[str, ...]] = ("PUBLIC KEY",)
+_PRIVATE_LABELS: Final[tuple[str, ...]] = ("PRIVATE KEY", "ENCRYPTED PRIVATE KEY")
+
+_PEM_BLOCK_RE: Final[re.Pattern[bytes]] = re.compile(
+    rb"-----BEGIN ([A-Z ]+)-----\r?\n((?:[A-Za-z0-9+/=]+\r?\n)+)-----END \1-----\r?\n?"
+)
 
 
 def looks_like_fingerprint(value: object) -> bool:
@@ -118,6 +138,90 @@ def get_public_key_fingerprint(pub_key: X25519PublicKey) -> str:
     return hashlib.sha256(public_key_raw_bytes(pub_key)).hexdigest()
 
 
+def check_pem_block(data: bytes, allowed_labels: tuple[str, ...]) -> bytes:
+    """Accept only a single, well-formed PEM block with an expected label.
+
+    The whole input must be exactly one ``-----BEGIN <label>-----`` ... ``-----END <label>-----``
+    block of base64 lines: no text before or after it, no second block, no non-ASCII bytes.
+    The parser of ``cryptography`` is more tolerant (it skips surrounding text), so this check
+    restricts what is accepted to the one encoding this project writes.
+
+    Raises:
+        InvalidKeyError: the data is not exactly one PEM block with an allowed label.
+    """
+    if len(data) > MAX_KEY_FILE_SIZE:
+        raise InvalidKeyError("key data is too large")
+    match = _PEM_BLOCK_RE.fullmatch(data)
+    if match is None or match.group(1).decode("ascii") not in allowed_labels:
+        raise InvalidKeyError("key data must be a single PEM block with the expected label")
+    return data
+
+
+def _check_key_path(path: Path) -> Path:
+    target = Path(path)
+    if target.suffix.lower() != KEY_FILE_SUFFIX:
+        raise InvalidKeyError("a key file must have the .pem extension")
+    return target
+
+
+def read_key_file(path: Path) -> bytes:
+    """Read a key file, refusing anything that is not a small regular ``.pem`` file.
+
+    Symbolic links, directories, devices and files larger than :data:`MAX_KEY_FILE_SIZE` are
+    refused; the file is never read in full before its size is known to be acceptable.
+    """
+    target = _check_key_path(path)
+    try:
+        if target.is_symlink():
+            raise InvalidKeyError("a key file must not be a symbolic link")
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(target, flags)
+    except OSError as exc:
+        raise InvalidKeyError("the key file cannot be opened") from exc
+    problem = None
+    data = b""
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            problem = "a key file must be a regular file"
+        else:
+            with os.fdopen(descriptor, "rb") as handle:
+                descriptor = -1
+                data = handle.read(MAX_KEY_FILE_SIZE + 1)
+    except OSError:
+        problem = "the key file cannot be read"
+    finally:
+        if descriptor != -1:
+            os.close(descriptor)
+    if problem is not None:
+        raise InvalidKeyError(problem)
+    if len(data) > MAX_KEY_FILE_SIZE:
+        raise InvalidKeyError("the key file is too large")
+    return data
+
+
+def write_key_file(path: Path, data: bytes, mode: int) -> Path:
+    """Create a new ``.pem`` key file; an existing file (or link) is never overwritten."""
+    target = _check_key_path(path)
+    flags = (
+        os.O_WRONLY
+        | os.O_CREAT
+        | os.O_EXCL
+        | getattr(os, "O_BINARY", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    try:
+        descriptor = os.open(target, flags, mode)
+    except FileExistsError as exc:
+        raise InvalidKeyError("the key file already exists and is not overwritten") from exc
+    except OSError as exc:
+        raise InvalidKeyError("the key file cannot be created") from exc
+    try:
+        os.write(descriptor, data)
+    finally:
+        os.close(descriptor)
+    return target
+
+
 def export_public_key_pem(pub_key: X25519PublicKey) -> bytes:
     """Serialize an :class:`X25519PublicKey` to PEM (``SubjectPublicKeyInfo``) bytes."""
     validated = validate_x25519_public_key(pub_key)
@@ -163,6 +267,7 @@ def load_public_key_pem(pem_data: Union[bytes, str]) -> X25519PublicKey:
         raw = bytes(pem_data)
     else:
         raise InvalidKeyError("pem_data must be bytes or str")
+    check_pem_block(raw, _PUBLIC_LABELS)
 
     try:
         loaded = serialization.load_pem_public_key(raw)
@@ -186,6 +291,7 @@ def load_private_key_pem(
 
     if password is not None and not isinstance(password, (bytes, bytearray, memoryview)):
         raise InvalidKeyError("password must be bytes or None")
+    check_pem_block(raw, _PRIVATE_LABELS)
 
     try:
         loaded = serialization.load_pem_private_key(
@@ -199,11 +305,8 @@ def load_private_key_pem(
 
 
 def save_public_key_pem(pub_key: X25519PublicKey, path: Path) -> Path:
-    """Write ``pub_key`` in PEM format to ``path``."""
-    target = Path(path)
-    pem = export_public_key_pem(pub_key)
-    target.write_bytes(pem)
-    return target
+    """Write ``pub_key`` in PEM format to a new ``.pem`` file (never overwrites)."""
+    return write_key_file(path, export_public_key_pem(pub_key), 0o644)
 
 
 def save_private_key_pem(
@@ -211,35 +314,28 @@ def save_private_key_pem(
     path: Path,
     password: Optional[bytes] = None,
 ) -> Path:
-    """Write ``priv_key`` in PEM format to ``path`` with mode ``0600``."""
-    target = Path(path)
-    pem = export_private_key_pem(priv_key, password=password)
-    flags = (
-        os.O_WRONLY
-        | os.O_CREAT
-        | os.O_TRUNC
-        | getattr(os, "O_BINARY", 0)
-        | getattr(os, "O_CLOEXEC", 0)
-    )
-    fd = os.open(target, flags, 0o600)
-    try:
-        os.write(fd, pem)
-    finally:
-        os.close(fd)
-    return target
+    """Write ``priv_key`` encrypted with ``password`` to a new ``.pem`` file with mode ``0600``.
+
+    A private key is never written to disk in the clear: the password is required.  The
+    protected place for a private key is the D6 keystore; this file is for exporting a key
+    that is encrypted too.
+    """
+    if not isinstance(password, (bytes, bytearray, memoryview)) or len(password) == 0:
+        raise InvalidKeyError("a private key file must be encrypted: a non-empty password is required")
+    return write_key_file(path, export_private_key_pem(priv_key, password=password), 0o600)
 
 
 def load_public_key_file(path: Path) -> X25519PublicKey:
-    """Read and validate an :class:`X25519PublicKey` from a PEM file at ``path``."""
-    return load_public_key_pem(Path(path).read_bytes())
+    """Read and validate an :class:`X25519PublicKey` from a ``.pem`` file at ``path``."""
+    return load_public_key_pem(read_key_file(path))
 
 
 def load_private_key_file(
     path: Path,
     password: Optional[bytes] = None,
 ) -> X25519PrivateKey:
-    """Read and validate an :class:`X25519PrivateKey` from a PEM file at ``path``."""
-    return load_private_key_pem(Path(path).read_bytes(), password=password)
+    """Read and validate an :class:`X25519PrivateKey` from a ``.pem`` file at ``path``."""
+    return load_private_key_pem(read_key_file(path), password=password)
 
 
 # Convenient aliases

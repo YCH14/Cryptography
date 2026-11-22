@@ -191,6 +191,8 @@ the packages signed by the attacker verify correctly under that key: the
 signature proves who holds the key, not that the key belongs to the right
 person. No certificate authority is used in this design.
 
+A signing public key is exchanged as a file with one accepted encoding: an Ed25519 key in PEM (`SubjectPublicKeyInfo`), saved with `save_signer_public_key_file` and read with `load_signer_public_key_file`. The file must have the `.pem` extension, be a regular file of at most 16 KiB and contain exactly one PEM block; text around the block, a second block, a private key, an X25519 or RSA key and any other format are refused. A file that passes these checks is only a well-formed key, not a trusted one: the recipient still compares its `signer_id` through another channel.
+
 ### Replacement of a signing key
 
 A sender replaces the signing key when it is lost, exposed or rotated. The new
@@ -259,4 +261,5 @@ Replay and rollback have their own tests:
 |------|-------|
 | `tests/signatures/test_container_id.py` | `container_id` present, unique per signing, covered by the signature; missing or malformed ids rejected even when re-signed |
 | `tests/signatures/test_replay.py` | first delivery accepted; the same container twice rejected (also after a restart); a new container with the same content accepted; independent signers; failed decryption and invalid signatures leave the record untouched; corrupted record not ignored; generic error; no guard, no detection |
+| `tests/signatures/test_signer_key_files.py` | Ed25519 public key files: round trip, one PEM block, X25519 and RSA keys refused, a private key refused, only `.pem`, no overwriting, too large, folder and missing file refused |
 | `tests/signatures/test_rollback.py` | versions in order accepted; older or equal version rejected; independent documents and signers; unversioned containers unaffected; invalid signing arguments refused; document fields covered by the signature; malformed fields rejected even when re-signed |

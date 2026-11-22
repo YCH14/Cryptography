@@ -54,6 +54,8 @@ Both JSON files are written as canonical JSON (sorted keys, compact), the same r
 
 **Files on disk.** Files are created with mode 0600 (on systems that support it). The keystore is built in a temporary directory and renamed into place, and an existing keystore is never overwritten.
 
+**Key files outside the keystore.** Public keys are shared as files, and a private key can be exported, so these files have one accepted encoding: PEM, `SubjectPublicKeyInfo` for a public key (X25519 for D3, Ed25519 for D5) and encrypted PKCS#8 for an exported private key. A key file must have the `.pem` extension, be a regular file (not a link, a folder or a device) of at most 16 KiB, and contain exactly one PEM block with the expected label. Text before or after the block, a second block, non-ASCII bytes, DER and any other key type (RSA, or Ed25519 where X25519 is expected) are refused before the key is used. The extension is a guard against mistakes and not a security boundary, because any file can be renamed; what protects the import is the check of content, size, kind of file and key type. A private key is never written in the clear (`save_private_key_pem` needs a password), key files are created without overwriting an existing file or link, and a private key file has mode 0600. The place for a private key is the keystore above; the exported file is only for moving a key, and it is encrypted too.
+
 ### Access flow
 
 1. The system asks for the password with `getpass` (or receives it as an argument).
@@ -171,6 +173,7 @@ The revocation notice is not signed: a compromised key cannot vouch for its own 
 - A password that is lost cannot be recovered, and there is no escrow.
 - Python cannot reliably wipe memory, so the decrypted key and the password stay in memory until they are freed.
 - A compromised device defeats the keystore (D1 assumption).
+- Key files are checked for encoding, key type, size and kind of file, but who can read or replace them is decided by the permissions of the operating system. A public key file that was swapped is still a valid key: only the fingerprint comparison through another channel detects it.
 - Revocation is local, plus a notice that the owner sends through a trusted channel. There is no revocation service, no signed or timestamped revocation list, and no way to know that a recipient received the notice.
 - The keyring manifest and the trusted signers file are plain JSON on the device. Someone who can write to them can change a status (for example, mark a revoked key as active again) but cannot read or use a key without its password. The statuses are checks made by this software, not a cryptographic barrier.
 - A revoked key is kept (so files can be recovered) and is as exposed as before: the revocation does not protect files an attacker already copied.
@@ -201,6 +204,9 @@ Rotation, revocation and the trusted signers have their own tests:
 | `tests/keystore/test_revocation.py` | revoking active and retired keys; a revoked key is not unlocked unless `allow_revoked=True`, and still needs the password; reason required; no double revocation; notice content; historical `decrypt` after a rotation; the compromised-key flow (revoke, recover, share again) |
 | `tests/keystore/test_trust.py` | key accepted only with a matching fingerprint; unknown and revoked signers refused; replacement keeps old containers valid; revocation, also from the owner's notice; forged signer id fails the signature; generic error; malformed files not ignored |
 | `tests/keystore/test_trust_replay.py` | trusted signer with a `ReplayGuard`: first delivery accepted, replay refused, older document version refused, newer version accepted, record kept between guard objects, unknown or revoked signer refused before the replay check and not recorded, failed decryption or tampering does not use up the container |
+| `tests/hybrid/test_key_files.py` | key files round trip; a private key file needs a password and is encrypted; only `.pem` files; an existing file or link is not overwritten; files that are too large, folders, links and missing files refused; anything but one PEM block refused (text around it, two blocks, wrong label, not base64, non-ASCII, DER, empty); public and private keys of another type refused |
+| `tests/signatures/test_signer_key_files.py` | Ed25519 public key files: round trip, one PEM block, X25519 and RSA keys refused, a private key refused, only `.pem`, no overwriting, too large, folder and missing file refused |
+| `tests/keystore/test_signer_key_import.py` | a signer key file is trusted only with the fingerprint confirmed through another channel; a swapped file does not match |
 | `tests/signatures/` | the D5 suite, including `test_container_id.py`, `test_replay.py` and `test_rollback.py`, now identical to D5 |
 
 ## Sources
