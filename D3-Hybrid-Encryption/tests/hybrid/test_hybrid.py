@@ -598,9 +598,12 @@ class TestKeysAndSecurityHygiene:
             load_private_key_pem(enc_priv_pem, password=b"wrong-password")
 
         pub_file = save_public_key_pem(alice_keys.public_key, tmp_path / "alice_pub.pem")
-        priv_file = save_private_key_pem(alice_keys.private_key, tmp_path / "alice_priv.pem")
+        priv_file = save_private_key_pem(
+            alice_keys.private_key, tmp_path / "alice_priv.pem", password=b"correct-password"
+        )
         assert get_public_key_fingerprint(load_public_key_file(pub_file)) == get_public_key_fingerprint(alice_keys.public_key)
-        assert get_public_key_fingerprint(load_private_key_file(priv_file).public_key()) == get_public_key_fingerprint(alice_keys.public_key)
+        loaded = load_private_key_file(priv_file, password=b"correct-password")
+        assert get_public_key_fingerprint(loaded.public_key()) == get_public_key_fingerprint(alice_keys.public_key)
 
     @pytest.mark.parametrize(
         "bad_key",
