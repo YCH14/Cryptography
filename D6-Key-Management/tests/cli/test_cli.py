@@ -37,8 +37,16 @@ def exchange_keys(alice: Path, bob: Path, tmp: Path) -> None:
     assert run(alice, "export", "encrypt", "--out", str(tmp / "alice-enc.pem")) == 0
     assert run(alice, "export", "sign", "--out", str(tmp / "alice-sign.pem")) == 0
     assert run(bob, "export", "encrypt", "--out", str(tmp / "bob-enc.pem")) == 0
-    assert run(alice, "contacts", "add", "bob", str(tmp / "bob-enc.pem")) == 0
-    assert run(bob, "contacts", "add", "alice", str(tmp / "alice-enc.pem")) == 0
+    assert run(alice, "contacts", "add", "bob", str(tmp / "bob-enc.pem"),
+               "--fingerprint", enc_fingerprint(bob)) == 0
+    assert run(bob, "contacts", "add", "alice", str(tmp / "alice-enc.pem"),
+               "--fingerprint", enc_fingerprint(alice)) == 0
+
+
+def enc_fingerprint(home: Path) -> str:
+    from vault.cli import Workspace
+
+    return Workspace(home).ring("encrypt").active_entry().key_id
 
 
 def alice_sign_fingerprint(alice: Path) -> str:
@@ -110,9 +118,10 @@ def test_share_with_contact_and_stranger_cannot_open(users, tmp_path, capsys):
     doc.write_bytes(b"for bob")
     assert run(alice, "encrypt", str(doc), "--to", "bob", "--out", str(tmp / "plan.vault")) == 0
     out = tmp / "from-alice.txt"
+    assert run(bob, "trust", "add", "alice", str(tmp / "alice-sign.pem"),
+               "--fingerprint", alice_sign_fingerprint(alice)) == 0
     assert run(bob, "decrypt", str(tmp / "plan.vault"), "--out", str(out)) == 0
     assert out.read_bytes() == b"for bob"
-    assert "no está firmado" in capsys.readouterr().out
     assert run(carol, "decrypt", str(tmp / "plan.vault"), "--out", str(tmp / "c.txt")) == 1
     assert not (tmp / "c.txt").exists()
 
@@ -122,7 +131,7 @@ def test_signed_file_needs_trusted_signer_then_replay_is_detected(users, capsys)
     exchange_keys(alice, bob, tmp)
     doc = tmp / "contract.txt"
     doc.write_bytes(b"signed content")
-    assert run(alice, "encrypt", str(doc), "--to", "bob", "--sign", "--out", str(tmp / "c.vault")) == 0
+    assert run(alice, "encrypt", str(doc), "--to", "bob", "--out", str(tmp / "c.vault")) == 0
     capsys.readouterr()
 
     # Bob does not trust Alice yet.
@@ -174,9 +183,9 @@ def test_rotate_keeps_old_files_readable_and_revoke_blocks_use(users, capsys):
                "--compromised", "--out", str(tmp / "notice.txt")) == 0
     assert b"stolen laptop" in (tmp / "notice.txt").read_bytes()
     doc.unlink()
-    assert run(alice, "decrypt", str(tmp / "old.txt.vault")) == 1
+    assert run(alice, "decrypt", str(tmp / "old.txt.vault"), "--no-replay-check") == 1
     assert not doc.exists()
-    assert run(alice, "decrypt", str(tmp / "old.txt.vault"), "--allow-revoked") == 0
+    assert run(alice, "decrypt", str(tmp / "old.txt.vault"), "--allow-revoked", "--no-replay-check") == 0
     assert doc.read_bytes() == b"made before rotation"
 
 
@@ -195,16 +204,18 @@ def test_revocation_notice_stops_trusting_signer(users, capsys):
 def test_contact_with_wrong_fingerprint_or_bad_name_is_refused(users):
     alice, bob, tmp = users
     assert run(bob, "export", "encrypt", "--out", str(tmp / "bob.pem")) == 0
+    good = enc_fingerprint(bob)
     assert run(alice, "contacts", "add", "bob", str(tmp / "bob.pem"), "--fingerprint", "ab" * 32) == 1
-    assert run(alice, "contacts", "add", "../evil", str(tmp / "bob.pem")) == 1
-    assert run(alice, "contacts", "add", "alice", str(tmp / "bob.pem")) == 1
+    assert run(alice, "contacts", "add", "../evil", str(tmp / "bob.pem"), "--fingerprint", good) == 1
+    assert run(alice, "contacts", "add", "alice", str(tmp / "bob.pem"), "--fingerprint", good) == 1
     assert not list((alice / "contacts").glob("*.pem"))
 
 
 def test_signing_key_is_not_accepted_as_a_contact(users):
     alice, _, tmp = users
     assert run(alice, "export", "sign", "--out", str(tmp / "sign.pem")) == 0
-    assert run(alice, "contacts", "add", "x", str(tmp / "sign.pem")) == 1
+    assert run(alice, "contacts", "add", "x", str(tmp / "sign.pem"),
+               "--fingerprint", alice_sign_fingerprint(alice)) == 1
 
 
 def test_backup_and_restore(users):
@@ -233,7 +244,7 @@ def test_interactive_menu_encrypts_and_decrypts(users, monkeypatch, capsys):
     doc.write_bytes(b"via menu")
     # 1) encrypt: file, recipients (none), sign? no ; 0) exit
     typed = iter([
-        "1", str(doc), "-", "n",
+        "1", str(doc), "-", "y",
         "0",
     ])
     monkeypatch.setattr("builtins.input", lambda prompt="": next(typed))
