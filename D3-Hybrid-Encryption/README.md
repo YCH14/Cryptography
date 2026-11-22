@@ -14,7 +14,7 @@ D3-Hybrid-Encryption/
 │   ├── symmetric.py       # D2 module (unchanged)
 │   ├── exceptions.py      # D2 errors + RecipientNotFoundError
 │   └── hybrid/
-│       ├── keys.py        # X25519 key pairs, PEM import/export, SHA-256 fingerprints of the raw public key
+│       ├── keys.py        # X25519 key pairs, strict PEM key files, SHA-256 fingerprints of the raw public key
 │       └── encryption.py  # encrypt_file_hybrid / decrypt_file_hybrid (VLT3 container, ECIES)
 ├── tests/
 │   ├── test_symmetric.py  # D2 suite

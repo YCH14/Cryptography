@@ -4,7 +4,7 @@ Private keys are never stored in plaintext. Each private key (the X25519 key of 
 
 - Key management design, lifecycle, threat model alignment and security discussion: [`docs/key_management_d6.md`](docs/key_management_d6.md)
 - Modules: [`vault/keystore/keystore.py`](vault/keystore/keystore.py) (one key), [`vault/keystore/keyring.py`](vault/keystore/keyring.py) (rotation, revocation, historical access), [`vault/keystore/trust.py`](vault/keystore/trust.py) (trusted signing keys)
-- Tests: [`tests/keystore/`](tests/keystore/) (`test_keystore.py`, `test_keyring.py`, `test_revocation.py`, `test_trust.py`, `test_trust_replay.py`)
+- Tests: [`tests/keystore/`](tests/keystore/) (`test_keystore.py`, `test_keyring.py`, `test_revocation.py`, `test_trust.py`, `test_trust_replay.py`, `test_signer_key_import.py`); key files: `tests/hybrid/test_key_files.py` and `tests/signatures/test_signer_key_files.py`
 
 This folder is self-contained: it includes the D2, D3 and D5 modules it builds on.
 
@@ -43,6 +43,10 @@ keystore/
 ```
 
 `metadata`, `kdf_parameters` and `salt` are bound to the encryption as AES-GCM associated data, so changing any file makes the keystore fail to open.
+
+### Key files
+
+Public keys (X25519 and Ed25519) and exported private keys are PEM files, and nothing else is accepted: a regular `.pem` file of at most 16 KiB with exactly one PEM block of the expected type. A private key is never written without a password, and an existing file is never overwritten. The details are in [`docs/key_management_d6.md`](docs/key_management_d6.md).
 
 ## Setup and tests
 
