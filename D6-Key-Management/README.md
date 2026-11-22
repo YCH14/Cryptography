@@ -15,8 +15,6 @@ D6-Key-Management/
 │   ├── exceptions.py       # D2/D3/D5 errors + keystore errors, UntrustedSignerError
 │   ├── hybrid/             # D3 module (ECIES with X25519)
 │   ├── signatures/         # D5 module (Ed25519, ReplayGuard: replay and rollback)
-│   ├── cli.py              # command-line interface (python -m vault)
-│   ├── __main__.py
 │   └── keystore/
 │       ├── keystore.py     # create_keystore, unlock_private_key, backup_keystore, restore_keystore
 │       ├── keyring.py      # Keyring: rotate, revoke, revocation_notice, decrypt old files
@@ -92,43 +90,6 @@ except KeystoreAccessError:
 backup_keystore(Path("alice-x25519"), Path("alice-x25519-backup"))
 restore_keystore(Path("alice-x25519-backup"), Path("alice-x25519-restored"), "a long passphrase")
 ```
-
-## Command-line interface
-
-Users do not need to write Python: `python -m vault` opens an interactive menu (in Spanish) to create an identity, encrypt and decrypt files, share public keys, manage contacts and trusted signers, rotate or revoke keys and back everything up. The same actions are available as subcommands for scripts. It uses only the standard library on top of the modules above.
-
-```bash
-# Linux / macOS: creates .venv on the first run
-./vault.sh
-# Windows: double-click vault.bat, or run it from a terminal
-vault.bat
-
-# or, with the environment already set up
-python -m vault                       # interactive menu
-python -m vault --help                # every subcommand
-```
-
-Typical use between two people (`alice` and `bob`), each with their own folder (`~/.vault` by default, `--home DIR` or `VAULT_HOME` to change it):
-
-```bash
-python -m vault init --owner alice                    # keys for encrypting and for signing
-python -m vault export encrypt                        # writes alice-encrypt.pub.pem and prints its fingerprint
-python -m vault contacts add bob bob-encrypt.pub.pem --fingerprint "<fingerprint Bob gave you>"
-python -m vault encrypt report.pdf --to bob --sign    # report.pdf.vault, readable by Bob and by Alice
-python -m vault trust add alice alice-sign.pub.pem --fingerprint "<fingerprint Alice gave you>"   # Bob
-python -m vault decrypt report.pdf.vault              # Bob: checks the signature, then decrypts
-python -m vault rotate encrypt                        # new key; old files stay readable
-python -m vault revoke sign --reason "laptop stolen" --compromised   # also writes the revocation notice
-python -m vault backup ../vault-backup
-```
-
-Notes:
-
-- Passwords are always asked with `getpass`, never as arguments, and one password protects both keys at creation (each key can get another one when rotated).
-- Fingerprints must be compared through a second channel. `contacts add` and `trust add` accept `--fingerprint` and refuse the key if it does not match; `trust add` requires it (D6).
-- `decrypt` never overwrites an existing file (use `--force`), opens unsigned files with a warning, and verifies signed files only against trusted signers. A signed container that was already accepted is refused as a replay (`--no-replay-check` to override).
-- Decryption failures keep the generic message of D3, so the CLI does not reveal whether the key or the file was wrong.
-- Tests: [`tests/cli/`](tests/cli/).
 
 ## Rotation, revocation and old files
 
