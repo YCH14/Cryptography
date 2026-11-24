@@ -244,7 +244,7 @@ def test_interactive_menu_encrypts_and_decrypts(users, monkeypatch, capsys):
     doc.write_bytes(b"via menu")
     # 1) encrypt: file, recipients (none), sign? no ; 0) exit
     typed = iter([
-        "1", str(doc), "-", "y",
+        "1", str(doc), "-", "y", "n",
         "0",
     ])
     monkeypatch.setattr("builtins.input", lambda prompt="": next(typed))
