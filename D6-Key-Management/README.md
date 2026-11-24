@@ -120,6 +120,7 @@ python -m vault export encrypt                        # writes alice-encrypt.pub
 python -m vault contacts add bob bob-encrypt.pub.pem --fingerprint "<fingerprint Bob gave you>"
 python -m vault encrypt report.pdf --to bob           # report.pdf.vault, signed by default, readable by Bob and by Alice
 python -m vault trust add alice alice-sign.pub.pem --fingerprint "<fingerprint Alice gave you>"   # Bob
+python -m vault inspect report.pdf.vault              # public fields only: recipients, signer; no password, nothing decrypted
 python -m vault decrypt report.pdf.vault              # Bob: checks the signature, then decrypts
 python -m vault rotate encrypt                        # new key; old files stay readable
 python -m vault revoke sign --reason "laptop stolen" --compromised   # also writes the revocation notice
@@ -131,6 +132,7 @@ Notes:
 - Passwords are always asked with `getpass`, never as arguments, and one password protects both keys at creation (each key can get another one when rotated).
 - Fingerprints must be compared through a second channel. `contacts add` and `trust add` both require `--fingerprint` and refuse the key if it does not match (D6).
 - `encrypt` signs by default (`--no-sign` to skip it). `decrypt` refuses a file that is not signed, or whose signature was removed, unless you pass `--allow-unsigned`: otherwise anyone could strip the signature and the file would be accepted. Your own signing key is trusted automatically, so you can open what you encrypted. Because the signature is checked with the replay record, decrypting the same file twice needs `--no-replay-check`.
+- `inspect` verifies nothing: it only shows what is written in the file (recipients, signer, document version), so do not trust it as proof of who made the file; `decrypt` does the checks.
 - Files the tool writes (keys, `.vault`, decrypted output) are created readable only by their owner and never through a symbolic link.
 - `decrypt` never overwrites an existing file (use `--force`), opens unsigned files with a warning, and verifies signed files only against trusted signers. A signed container that was already accepted is refused as a replay (`--no-replay-check` to override).
 - Decryption failures keep the generic message of D3, so the CLI does not reveal whether the key or the file was wrong.

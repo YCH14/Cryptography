@@ -145,10 +145,15 @@ Each row follows one chain: asset → threat → attack scenario → security re
 
 Coverage check: every asset (A1–A4), every security requirement (SR1–SR5), every scenario (S1–S11) and every constraint (C1–C11) appears at least once.
 
-## 8. CLI Interface Proposal
+## 8. CLI Interface
 
-To operate the vault in alignment with the architectural diagram, the system will expose the following console commands:
+The vault is operated from the console with `python -m vault` (D6), in alignment with the architectural diagram. Run without arguments it opens a guided menu (in Spanish); every action is also a subcommand for scripts. A home folder (`--home`, `$VAULT_HOME` or `~/.vault`) holds the Key Store, the contacts, the trusted signers and the replay record.
 
-1. **`generate-keys`**: Creates the "private key material" and secures it in the local Key Store using a user-provided password.
-2. **`encrypt`**: Executes steps 1 to 4 ("Protect file", "Select recipient public key", "Sign package"). Takes a local file, applies hybrid encryption, and generates the secure package to be sent to storage.
-3. **`decrypt`**: Executes steps 5 to 8 ("Verify package", "Recover key", "Decrypt and verify"). Requires the recipient's password to unlock the Key Store, processes the encrypted container, and returns the original file in plaintext.
+1. **`init`**: Creates the "private key material" (an X25519 key for decryption and an Ed25519 key for signing) and secures it in the local Key Store using a user-provided password. It also makes the owner trust their own signing key.
+2. **`export`, `contacts add`, `trust add`**: Share public keys. `contacts add` (encryption keys) and `trust add` (signing keys) accept a key only if the fingerprint that the other person gave through another channel matches (C11).
+3. **`encrypt`**: Executes steps 1 to 4 ("Protect file", "Select recipient public key", "Sign package"). Takes a local file, applies hybrid encryption for one or more recipients and signs the package by default (`--no-sign` is explicit).
+4. **`inspect`**: Shows the public fields of a package (format, recipients, signer, document version) without a password and without decrypting. Nothing is verified, so it is informational only.
+5. **`decrypt`**: Executes steps 5 to 8 ("Verify package", "Recover key", "Decrypt and verify"). Requires the recipient's password to unlock the Key Store. The signer must be trusted, the signature valid and the package not a replay before anything is decrypted. A package that is not signed, or whose signature was removed, is refused unless `--allow-unsigned` is given (S5).
+6. **`rotate`, `revoke`, `trust replace`, `trust revoke`, `trust import-revocation`, `backup`, `restore`**: Key lifecycle (C10) and backup.
+
+Every failure prints one line and exits with status 1, and nothing is written when a step fails.
