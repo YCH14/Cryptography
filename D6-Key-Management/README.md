@@ -99,7 +99,7 @@ restore_keystore(Path("alice-x25519-backup"), Path("alice-x25519-restored"), "a 
 
 ## Command-line interface
 
-Users do not need to write Python: `python -m vault` opens an interactive menu (in Spanish) to create an identity, encrypt and decrypt files, share public keys, manage contacts and trusted signers, rotate or revoke keys, inspect a file without opening it and back everything up (and restore it on a new computer). The same actions are available as subcommands for scripts. It uses only the standard library on top of the modules above.
+Users do not need to write Python: `python -m vault` opens an interactive menu to create an identity, encrypt and decrypt files, share public keys, manage contacts and trusted signers, rotate or revoke keys, inspect a file without opening it and back everything up (and restore it on a new computer). The same actions are available as subcommands for scripts. It uses only the standard library on top of the modules above.
 
 ```bash
 # Linux / macOS: creates .venv on the first run

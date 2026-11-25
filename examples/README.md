@@ -23,7 +23,7 @@ The password is fixed inside the script only so the demo runs unattended. Real u
 
 ## Manual walkthrough (two terminals)
 
-Use the interactive menu (Spanish) or the subcommands. Both users work in their own folder (`--home`).
+Use the interactive menu or the subcommands. Both users work in their own folder (`--home`).
 
 ```bash
 cd D6-Key-Management

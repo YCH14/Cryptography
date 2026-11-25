@@ -45,7 +45,7 @@ python -m pip install -r requirements.txt
 
 ```bash
 cd D6-Key-Management
-python -m vault                                   # interactive menu (Spanish)
+python -m vault                                   # interactive menu
 python -m vault --home alice init --owner alice   # or use subcommands
 python -m vault --home alice encrypt report.pdf --to bob
 python -m vault --home bob decrypt report.pdf.vault --out report.pdf
