@@ -80,7 +80,7 @@ _NAME_RE = re.compile(r"[A-Za-z0-9._-]{1,64}")
 
 # "encrypt" -> the X25519 keyring (D3); "sign" -> the Ed25519 keyring (D5).
 _KINDS = {"encrypt": ("x25519", "X25519"), "sign": ("ed25519", "Ed25519")}
-_KIND_LABEL = {"encrypt": "cifrado", "sign": "firma"}
+_KIND_LABEL = {"encrypt": "encryption", "sign": "signing"}
 
 
 class CliError(Exception):
@@ -117,8 +117,8 @@ class Workspace:
     def require_initialized(self) -> None:
         if not self.initialized():
             raise CliError(
-                f"Todavía no hay una identidad en {self.home}. "
-                "Créala primero con la opción 'Crear mi identidad' (o: python -m vault init)."
+                f"There is no identity in {self.home} yet. "
+                "Create it first (the menu offers to do it, or run: python -m vault init)."
             )
 
     def ring(self, kind: str) -> Keyring:
@@ -149,11 +149,11 @@ def _normalize_fingerprint(text: str) -> str:
     return re.sub(r"[\s:.-]", "", text).lower()
 
 
-def _check_name(name: str, what: str = "El nombre") -> str:
+def _check_name(name: str, what: str = "The name") -> str:
     if not _NAME_RE.fullmatch(name) or looks_like_fingerprint(name):
         raise CliError(
-            f"{what} debe tener de 1 a 64 caracteres: letras, números, punto, guion o guion bajo "
-            "(sin espacios)."
+            f"{what} must be 1 to 64 characters: letters, digits, dot, hyphen or underscore "
+            "(no spaces)."
         )
     return name
 
@@ -170,14 +170,14 @@ def _ask_password(prompt: str, *, confirm: bool = False) -> str:
             return password
         problem = None
         if len(password) < MIN_PASSWORD_LENGTH:
-            problem = f"La contraseña debe tener al menos {MIN_PASSWORD_LENGTH} caracteres."
-        elif getpass.getpass("Repite la contraseña: ") != password:
-            problem = "Las contraseñas no coinciden."
+            problem = f"The password must be at least {MIN_PASSWORD_LENGTH} characters long."
+        elif getpass.getpass("Repeat the password: ") != password:
+            problem = "The passwords do not match."
         if problem is None:
             return password
         if not _ASK_AGAIN:
             raise CliError(problem)
-        print(f"{problem} Intenta de nuevo.")
+        print(f"{problem} Try again.")
 
 
 def _write_new(path: Path, data: bytes, *, force: bool = False, private: bool = True) -> Path:
@@ -189,9 +189,9 @@ def _write_new(path: Path, data: bytes, *, force: bool = False, private: bool = 
     """
     path = Path(path)
     if (path.exists() or path.is_symlink()) and not force:
-        raise CliError(f"{path} ya existe. Elige otro nombre (o usa --force para reemplazarlo).")
+        raise CliError(f"{path} already exists. Choose another name (or use --force to replace it).")
     if path.is_symlink():
-        raise CliError(f"{path} es un enlace simbólico; no se escribe a través de él.")
+        raise CliError(f"{path} is a symbolic link; it is not written through.")
     path.parent.mkdir(parents=True, exist_ok=True)
     if force and path.exists():
         path.unlink()
@@ -199,7 +199,7 @@ def _write_new(path: Path, data: bytes, *, force: bool = False, private: bool = 
     try:
         descriptor = os.open(path, flags, 0o600 if private else 0o644)
     except FileExistsError:
-        raise CliError(f"{path} ya existe. Elige otro nombre (o usa --force para reemplazarlo).") from None
+        raise CliError(f"{path} already exists. Choose another name (or use --force to replace it).") from None
     try:
         os.write(descriptor, data)
     finally:
@@ -227,13 +227,13 @@ def _read_file(path: Path, limit: int = MAX_CONTAINER_SIZE) -> bytes:
     """Read a regular file (not a link, folder or device) of at most ``limit`` bytes."""
     path = Path(path)
     if path.is_symlink() or not path.is_file():
-        raise CliError(f"No encuentro el archivo: {path}")
+        raise CliError(f"File not found: {path}")
     with path.open("rb") as handle:
         if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
-            raise CliError(f"{path} no es un archivo normal.")
+            raise CliError(f"{path} is not a regular file.")
         data = handle.read(limit + 1)
     if len(data) > limit:
-        raise CliError(f"{path} es demasiado grande (máximo {limit // 2**20} MiB).")
+        raise CliError(f"{path} is too large (maximum {limit // 2**20} MiB).")
     return data
 
 
@@ -242,8 +242,8 @@ def _load_ed25519_public(path: Path) -> Ed25519PublicKey:
         return load_signer_public_key_file(Path(path))
     except (VaultError, ValueError) as exc:
         raise CliError(
-            f"{path} no es una llave pública de firma (Ed25519) válida: debe ser un archivo .pem "
-            "pequeño con un solo bloque PEM."
+            f"{path} is not a valid public signing key (Ed25519): it must be a small .pem file "
+            "with a single PEM block."
         ) from exc
 
 
@@ -252,16 +252,16 @@ def _resolve_key(ring: Keyring, prefix: Optional[str]) -> KeyEntry:
     if prefix is None:
         entry = ring.active_entry()
         if entry is None:
-            raise CliError("No hay una llave activa. Crea una nueva (Mis llaves > Crear llave nueva, o el comando rotate).")
+            raise CliError("There is no active key. Create a new one (My keys > Create new key, or the rotate command).")
         return entry
     prefix = _normalize_fingerprint(prefix)
     if len(prefix) < 6:
-        raise CliError("Escribe al menos los primeros 6 caracteres del identificador de la llave.")
+        raise CliError("Type at least the first 6 characters of the key identifier.")
     matches = [e for e in ring.entries() if e.key_id.startswith(prefix)]
     if not matches:
-        raise CliError("Ninguna llave coincide con ese identificador. Mira la lista con 'keys'.")
+        raise CliError("No key matches that identifier. See the list with 'keys'.")
     if len(matches) > 1:
-        raise CliError("Ese identificador es ambiguo: escribe más caracteres.")
+        raise CliError("That identifier is ambiguous: type more characters.")
     return matches[0]
 
 
@@ -279,11 +279,11 @@ def _new_key(ws: Workspace, kind: str, password: str) -> KeyEntry:
 
 
 def _describe(entry: KeyEntry) -> str:
-    text = f"{entry.key_id[:16]}…  {entry.status:<8}  creada {entry.created[:10]}"
+    text = f"{entry.key_id[:16]}…  {entry.status:<8}  created {entry.created[:10]}"
     if entry.status == "revoked":
-        text += f"  revocada {str(entry.revoked_at)[:10]}: {entry.reason}"
+        text += f"  revoked {str(entry.revoked_at)[:10]}: {entry.reason}"
         if entry.compromised:
-            text += " (COMPROMETIDA)"
+            text += " (COMPROMISED)"
     return text
 
 
@@ -303,10 +303,10 @@ def _trust_own_signing_key(ws: Workspace, entry: KeyEntry, previous_id: Optional
 
 
 def do_init(ws: Workspace, owner: str) -> None:
-    _check_name(owner, "Tu nombre")
+    _check_name(owner, "Your name")
     if ws.initialized():
-        raise CliError(f"Ya existe una identidad en {ws.home}.")
-    password = _ask_password("Elige una contraseña para proteger tus llaves: ", confirm=True)
+        raise CliError(f"An identity already exists in {ws.home}.")
+    password = _ask_password("Choose a password to protect your keys: ", confirm=True)
     _private_dir(ws.home)
     created = []
     try:
@@ -321,9 +321,9 @@ def do_init(ws: Workspace, owner: str) -> None:
         (ws.home / "trusted_signers.json").unlink(missing_ok=True)
         raise
     ws.contacts.mkdir(exist_ok=True)
-    print(f"Listo, {owner}. Se crearon tus llaves en {ws.home}")
-    print("Tu llave de cifrado y tu llave de firma quedaron protegidas con tu contraseña.")
-    print("Si la olvidas no hay forma de recuperarlas. Guarda una copia de seguridad (opción 'backup').")
+    print(f"Done, {owner}. Your keys were created in {ws.home}")
+    print("Your encryption key and your signing key are protected with your password.")
+    print("If you forget it there is no way to recover them. Make a backup (the 'backup' command).")
     show_fingerprints(ws)
 
 
@@ -331,18 +331,18 @@ def show_fingerprints(ws: Workspace) -> None:
     for kind in _KINDS:
         entry = ws.ring(kind).active_entry()
         if entry:
-            print(f"\nHuella de tu llave de {_KIND_LABEL[kind]} (compárala por otro canal al compartirla):")
+            print(f"\nFingerprint of your {_KIND_LABEL[kind]} key (compare it over another channel when sharing it):")
             print(f"  {_group(entry.key_id)}")
 
 
 def do_keys(ws: Workspace) -> None:
     ws.require_initialized()
-    print(f"Identidad: {ws.owner()}    Carpeta: {ws.home}")
+    print(f"Identity: {ws.owner()}    Folder: {ws.home}")
     for kind in _KINDS:
-        print(f"\nLlaves de {_KIND_LABEL[kind]}:")
+        print(f"\n{_KIND_LABEL[kind].capitalize()} keys:")
         entries = ws.ring(kind).entries()
         if not entries:
-            print("  (ninguna)")
+            print("  (none)")
         for entry in reversed(entries):
             print("  " + _describe(entry))
 
@@ -350,13 +350,13 @@ def do_keys(ws: Workspace) -> None:
 def do_export_public(ws: Workspace, kind: str, out: Optional[Path], force: bool) -> Path:
     entry = ws.ring(kind).active_entry()
     if entry is None:
-        raise CliError("No hay una llave activa de ese tipo. Crea una nueva (Mis llaves > Crear llave nueva, o el comando rotate).")
+        raise CliError("There is no active key of that type. Create a new one (My keys > Create new key, or the rotate command).")
     data = _read_file(ws.public_path(entry.key_id))
     target = Path(out) if out else Path(f"{ws.owner()}-{kind}.pub.pem")
     _write_new(target, data, force=force, private=False)
-    print(f"Llave pública de {_KIND_LABEL[kind]} guardada en {target}")
-    print("Envíala a quien la necesite; es pública. Dile también esta huella por OTRO canal")
-    print("(en persona, llamada) para que pueda comprobar que nadie la cambió:")
+    print(f"Public {_KIND_LABEL[kind]} key saved to {target}")
+    print("Send it to whoever needs it; it is public. Also tell them this fingerprint over ANOTHER channel")
+    print("(in person, by phone) so they can check that nobody changed it:")
     print(f"  {_group(entry.key_id)}")
     return target
 
@@ -364,33 +364,33 @@ def do_export_public(ws: Workspace, kind: str, out: Optional[Path], force: bool)
 def do_contact_add(ws: Workspace, name: str, pem: Path, fingerprint: str, force: bool) -> None:
     _check_name(name)
     if name.lower() == ws.owner().lower():
-        raise CliError("Ese nombre es el tuyo; elige otro para el contacto.")
+        raise CliError("That name is yours; choose another one for the contact.")
     if not fingerprint:
-        raise CliError("Falta la huella: pídesela a esa persona por otro canal (en persona, llamada).")
+        raise CliError("The fingerprint is missing: ask that person for it over another channel (in person, by phone).")
     try:
         public_key = load_public_key_file(Path(pem))
     except (VaultError, ValueError) as exc:
-        raise CliError(f"{pem} no es una llave pública de cifrado (X25519) válida.") from exc
+        raise CliError(f"{pem} is not a valid public encryption key (X25519).") from exc
     actual = get_public_key_fingerprint(public_key)
     if _normalize_fingerprint(fingerprint) != actual:
-        raise CliError("La huella no coincide: no se agregó el contacto. La llave pudo ser cambiada.")
+        raise CliError("The fingerprint does not match: the contact was not added. The key may have been changed.")
     ws.contacts.mkdir(exist_ok=True)
     _write_new(ws.contacts / f"{name}.pem", _public_pem(public_key), force=force, private=False)
-    print(f"Contacto '{name}' agregado. Huella:\n  {_group(actual)}")
+    print(f"Contact '{name}' added. Fingerprint:\n  {_group(actual)}")
 
 
 def _contact_key(ws: Workspace, name: str):
     _check_name(name)
     path = ws.contacts / f"{name}.pem"
     if not path.is_file():
-        raise CliError(f"No tienes un contacto llamado '{name}'. Agrégalo primero.")
+        raise CliError(f"You have no contact named '{name}'. Add it first.")
     return load_public_key_file(path)
 
 
 def do_contact_list(ws: Workspace) -> None:
     files = sorted(ws.contacts.glob("*.pem")) if ws.contacts.is_dir() else []
     if not files:
-        print("No tienes contactos todavía.")
+        print("You have no contacts yet.")
     for path in files:
         print(f"  {path.stem:<20} {_group(get_public_key_fingerprint(load_public_key_file(path)))}")
 
@@ -398,7 +398,7 @@ def do_contact_list(ws: Workspace) -> None:
 def do_contact_remove(ws: Workspace, name: str) -> None:
     _contact_key(ws, name)
     (ws.contacts / f"{name}.pem").unlink()
-    print(f"Contacto '{name}' eliminado.")
+    print(f"Contact '{name}' removed.")
 
 
 def do_encrypt(
@@ -416,12 +416,12 @@ def do_encrypt(
     ws.require_initialized()
     src = Path(src)
     if not src.is_file():
-        raise CliError(f"No encuentro el archivo: {src}")
+        raise CliError(f"File not found: {src}")
     if src.stat().st_size > MAX_PLAINTEXT_SIZE:
-        raise CliError(f"El archivo es demasiado grande (máximo {MAX_PLAINTEXT_SIZE // 2**20} MiB).")
+        raise CliError(f"The file is too large (maximum {MAX_PLAINTEXT_SIZE // 2**20} MiB).")
     target = Path(out) if out else src.with_name(src.name + VAULT_SUFFIX)
     if target.exists() and not force:
-        raise CliError(f"{target} ya existe. Elige otro nombre (o usa --force para reemplazarlo).")
+        raise CliError(f"{target} already exists. Choose another name (or use --force to replace it).")
 
     owner = ws.owner()
     recipients = []
@@ -432,16 +432,16 @@ def do_encrypt(
     if include_self:
         entry = ws.ring("encrypt").active_entry()
         if entry is None:
-            raise CliError("No tienes una llave de cifrado activa. Crea una nueva (Mis llaves > Crear llave nueva, o el comando rotate).")
+            raise CliError("You have no active encryption key. Create a new one (My keys > Create new key, or the rotate command).")
         recipients.append((owner, load_public_key_file(ws.public_path(entry.key_id))))
     recipients += [(name, _contact_key(ws, name)) for name in names]
     if not recipients:
-        raise CliError("Elige al menos un destinatario.")
+        raise CliError("Choose at least one recipient.")
 
     signing_key = None
     if sign:
         signing_key = ws.ring("sign").unlock_active(
-            _ask_password("Contraseña de tu llave de firma: ")
+            _ask_password("Password of your signing key: ")
         )
     container = encrypt_bytes_hybrid(src.read_bytes(), recipients, filename=src.name)
     if signing_key is not None:
@@ -450,12 +450,12 @@ def do_encrypt(
         )
     _write_new(target, container, force=force)
     who = ", ".join(name for name, _ in recipients)
-    print(f"Archivo cifrado: {target}")
-    print(f"  Pueden abrirlo: {who}")
+    print(f"Encrypted file: {target}")
+    print(f"  Can be opened by: {who}")
     if sign:
-        print("  Firmado: sí")
+        print("  Signed: yes")
     else:
-        print("  Firmado: NO. Quien lo abra no podrá comprobar quién lo creó y deberá aceptar abrirlo sin firma (--allow-unsigned).")
+        print("  Signed: NO. Whoever opens it cannot check who created it and must agree to open it unsigned (--allow-unsigned).")
     return target
 
 
@@ -485,39 +485,39 @@ def do_inspect(ws: Workspace, src: Path) -> None:
         or document.get("magic") != "VLT3"
         or not isinstance(document.get("recipients"), list)
     ):
-        raise CliError(f"{src} no parece un archivo de la bóveda.")
+        raise CliError(f"{src} does not look like a vault file.")
 
     own: set = set()
     if ws.initialized():
         own = {entry.key_id for entry in ws.ring("encrypt").entries()}
     recipients = [r for r in document["recipients"] if isinstance(r, dict)]
 
-    print(f"Archivo: {_safe(src)}  ({len(raw)} bytes)")
-    print(f"  Formato:        {_safe(document.get('magic'))} v{_safe(document.get('version'))}")
-    print(f"  Cifrado:        {_safe(document.get('algorithm'))}, llave por destinatario con {_safe(document.get('key_wrap_algorithm'))}")
-    print(f"  Nombre guardado: {_safe(document.get('filename'))}")
+    print(f"File: {_safe(src)}  ({len(raw)} bytes)")
+    print(f"  Format:         {_safe(document.get('magic'))} v{_safe(document.get('version'))}")
+    print(f"  Encryption:     {_safe(document.get('algorithm'))}, per-recipient key with {_safe(document.get('key_wrap_algorithm'))}")
+    print(f"  Stored name:    {_safe(document.get('filename'))}")
     stamp = document.get("timestamp")
     if type(stamp) is int and 0 <= stamp < 4_102_444_800:
-        print(f"  Creado:         {datetime.fromtimestamp(stamp, timezone.utc):%Y-%m-%d %H:%M} UTC")
+        print(f"  Created:        {datetime.fromtimestamp(stamp, timezone.utc):%Y-%m-%d %H:%M} UTC")
     metadata = document.get("metadata")
     if isinstance(metadata, dict) and metadata:
-        print("  Metadatos:      " + _safe(json.dumps(metadata, sort_keys=True, ensure_ascii=False), 200))
-    print(f"  Destinatarios ({len(recipients)}):")
+        print("  Metadata:       " + _safe(json.dumps(metadata, sort_keys=True, ensure_ascii=False), 200))
+    print(f"  Recipients ({len(recipients)}):")
     for r in recipients[:20]:
         fingerprint = str(r.get("fingerprint", ""))
-        mark = "   <- tú" if fingerprint in own else ""
+        mark = "   <- you" if fingerprint in own else ""
         print(f"    - {_safe(r.get('id'), 40)}  {_safe(fingerprint[:16])}…{mark}")
     if len(recipients) > 20:
-        print(f"    … y {len(recipients) - 20} más")
+        print(f"    … and {len(recipients) - 20} more")
     if "signature" in document or "signer_id" in document:
-        print("  Firma:          sí")
-        print(f"    Firmante:     {_safe(str(document.get('signer_id', ''))[:16])}…")
-        print(f"    Contenedor:   {_safe(document.get('container_id'))}")
+        print("  Signature:      yes")
+        print(f"    Signer:       {_safe(str(document.get('signer_id', ''))[:16])}…")
+        print(f"    Container:    {_safe(document.get('container_id'))}")
         if "document_id" in document:
-            print(f"    Documento:    {_safe(document.get('document_id'))}  versión {_safe(document.get('document_version'))}")
+            print(f"    Document:     {_safe(document.get('document_id'))}  version {_safe(document.get('document_version'))}")
     else:
-        print("  Firma:          NO (para abrirlo habrá que aceptarlo sin firma: --allow-unsigned)")
-    print("Solo son datos públicos del archivo: no se verificó la firma y nada se descifró.")
+        print("  Signature:      NO (opening it requires accepting it unsigned: --allow-unsigned)")
+    print("These are only the public fields of the file: the signature was not verified and nothing was decrypted.")
 
 
 def _decrypt_target(src: Path, out: Optional[Path] = None) -> Path:
@@ -526,7 +526,7 @@ def _decrypt_target(src: Path, out: Optional[Path] = None) -> Path:
         return Path(out)
     if src.name.endswith(VAULT_SUFFIX) and len(src.name) > len(VAULT_SUFFIX):
         return src.with_name(src.name[: -len(VAULT_SUFFIX)])
-    return src.with_name(src.name + ".descifrado")
+    return src.with_name(src.name + ".decrypted")
 
 
 def do_decrypt(
@@ -545,12 +545,12 @@ def do_decrypt(
     target = _decrypt_target(src, out)
     if target.exists() and not force:
         raise CliError(
-            f"{target} ya existe y se sobrescribiría. Indica otro nombre de salida "
-            "(o usa --force para reemplazarlo)."
+            f"{target} already exists and would be overwritten. Give another output name "
+            "(or use --force to replace it)."
         )
 
     ring = ws.ring("encrypt")
-    password = _ask_password("Contraseña de tus llaves: ")
+    password = _ask_password("Password of your keys: ")
     try:
         document = json.loads(container)
     except ValueError:
@@ -560,8 +560,8 @@ def do_decrypt(
     signed = isinstance(document, dict) and ("signer_id" in document or "signature" in document)
     if not signed and not allow_unsigned:
         raise UnsignedFileError(
-            "El archivo no está firmado, o le quitaron la firma, y no se puede comprobar quién lo creó. "
-            "No se descifra. Si estás seguro de su origen por otro medio, usa --allow-unsigned."
+            "The file is not signed, or its signature was removed, so it cannot be checked who created it. "
+            "It was not decrypted. If you are sure of its origin by other means, use --allow-unsigned."
         )
 
     if signed:
@@ -579,27 +579,27 @@ def do_decrypt(
         plaintext = ring.decrypt(container, password, allow_revoked=allow_revoked)
 
     _write_new(target, plaintext, force=force)
-    print(f"Archivo descifrado: {target}")
+    print(f"Decrypted file: {target}")
     if signed:
-        print("  La firma es válida y viene de un firmante en el que confías.")
+        print("  The signature is valid and comes from a signer you trust.")
     else:
-        print("  Aviso: lo abriste con --allow-unsigned; no se comprobó quién lo creó.")
+        print("  Warning: you opened it with --allow-unsigned; it was not checked who created it.")
     return target
 
 
 def do_rotate(ws: Workspace, kind: str) -> None:
     ws.require_initialized()
-    print(f"Se creará una llave nueva de {_KIND_LABEL[kind]}; la anterior se conserva para abrir archivos viejos.")
-    password = _ask_password("Contraseña para la llave nueva: ", confirm=True)
+    print(f"A new {_KIND_LABEL[kind]} key will be created; the previous one is kept to open old files.")
+    password = _ask_password("Password for the new key: ", confirm=True)
     previous = ws.ring(kind).active_entry()
     entry = _new_key(ws, kind, password)
     if kind == "sign":
         _trust_own_signing_key(ws, entry, previous.key_id if previous else None)
-    print(f"Llave nueva activa. Huella:\n  {_group(entry.key_id)}")
+    print(f"New key is active. Fingerprint:\n  {_group(entry.key_id)}")
     if kind == "sign":
-        print("Quien confiaba en tu llave de firma anterior debe volver a confirmar tu huella nueva.")
+        print("Anyone who trusted your previous signing key must confirm your new fingerprint again.")
     else:
-        print("Vuelve a compartir tu llave pública (opción 'export') para que te cifren con la nueva.")
+        print("Share your public key again (the 'export' command) so people encrypt for your new key.")
 
 
 def do_revoke(
@@ -613,23 +613,23 @@ def do_revoke(
 ) -> Path:
     ring = ws.ring(kind)
     entry = _resolve_key(ring, key_prefix)
-    target = Path(notice_out) if notice_out else Path(f"revocacion-{kind}-{entry.key_id[:8]}.txt")
+    target = Path(notice_out) if notice_out else Path(f"revocation-{kind}-{entry.key_id[:8]}.txt")
     if (target.exists() or target.is_symlink()) and not force:
         # Checked before revoking: otherwise the key would be revoked and the notice never written.
-        raise CliError(f"{target} ya existe. Elige otro nombre (o usa --force para reemplazarlo).")
+        raise CliError(f"{target} already exists. Choose another name (or use --force to replace it).")
     ring.revoke(entry.key_id, reason, compromised=compromised)
     if kind == "sign" and ws.trust_file.exists() and ws.trusted().status(entry.key_id) in ("trusted", "superseded"):
         ws.trusted().revoke(entry.key_id, reason)
     notice = ring.revocation_notice(entry.key_id)
     _write_new(target, notice, force=force)
-    print(f"Llave {entry.key_id[:16]}… revocada.")
-    print(f"Aviso de revocación guardado en {target}")
-    print("Envíalo por un canal confiable a quienes confían en esa llave.")
+    print(f"Key {entry.key_id[:16]}… revoked.")
+    print(f"Revocation notice saved to {target}")
+    print("Send it over a trusted channel to those who trust that key.")
     if ring.active_entry() is None:
-        print("Ya no tienes llave activa de este tipo: crea una nueva (Mis llaves > Crear llave nueva, o el comando rotate).")
+        print("You no longer have an active key of this type: create a new one (My keys > Create new key, or the rotate command).")
     if compromised:
-        print("Como pudo ser conocida por otros, recupera tus archivos con esa llave y compártelos de nuevo")
-        print("con la llave nueva (descifrar con --allow-revoked).")
+        print("Since others may know it, recover your files with that key and share them again")
+        print("with the new key (decrypt with --allow-revoked).")
     return target
 
 
@@ -640,7 +640,7 @@ def do_trust_add(ws: Workspace, name: str, pem: Path, fingerprint: str) -> None:
     signer_id = ws.trusted().add(
         name, public_key, expected_fingerprint=_normalize_fingerprint(fingerprint)
     )
-    print(f"Ahora confías en las firmas de '{name}' ({_group(signer_id)}).")
+    print(f"You now trust the signatures of '{name}' ({_group(signer_id)}).")
 
 
 def do_trust_replace(ws: Workspace, old_prefix: str, pem: Path, fingerprint: str) -> None:
@@ -649,14 +649,14 @@ def do_trust_replace(ws: Workspace, old_prefix: str, pem: Path, fingerprint: str
     new_id = trusted.replace(
         old, _load_ed25519_public(pem), expected_fingerprint=_normalize_fingerprint(fingerprint)
     )
-    print(f"Llave reemplazada. Nueva huella:\n  {_group(new_id)}")
+    print(f"Key replaced. New fingerprint:\n  {_group(new_id)}")
 
 
 def _match_signer(trusted: TrustedSigners, prefix: str) -> str:
     prefix = _normalize_fingerprint(prefix)
     matches = [s for s in trusted.signer_ids() if len(prefix) >= 6 and s.startswith(prefix)]
     if len(matches) != 1:
-        raise CliError("No encuentro un firmante único con ese identificador. Mira la lista con 'trust list'.")
+        raise CliError("I cannot find a single signer with that identifier. See the list with 'trust list'.")
     return matches[0]
 
 
@@ -664,7 +664,7 @@ def do_trust_list(ws: Workspace) -> None:
     trusted = ws.trusted()
     ids = trusted.signer_ids() if ws.trust_file.exists() else []
     if not ids:
-        print("No confías en ningún firmante todavía.")
+        print("You do not trust any signer yet.")
     names = json.loads(ws.trust_file.read_text("utf-8"))["signers"] if ids else {}
     for signer_id in ids:
         print(f"  {names[signer_id]['name']:<20} {trusted.status(signer_id):<11} {_group(signer_id)}")
@@ -673,37 +673,37 @@ def do_trust_list(ws: Workspace) -> None:
 def do_trust_revoke(ws: Workspace, prefix: str, reason: str) -> None:
     trusted = ws.trusted()
     trusted.revoke(_match_signer(trusted, prefix), reason)
-    print("Firmante revocado: sus archivos ya no se aceptarán.")
+    print("Signer revoked: their files will no longer be accepted.")
 
 
 def do_trust_import(ws: Workspace, notice: Path) -> None:
     signer_id = ws.trusted().import_revocation(_read_file(notice))
-    print(f"Revocación importada: {_group(signer_id)} ya no es de confianza.")
+    print(f"Revocation imported: {_group(signer_id)} is no longer trusted.")
 
 
 def do_backup(ws: Workspace, dest: Path) -> None:
     ws.require_initialized()
     dest = Path(dest)
     if dest.exists():
-        raise CliError(f"{dest} ya existe. Elige una carpeta nueva.")
+        raise CliError(f"{dest} already exists. Choose a new folder.")
     shutil.copytree(ws.home, dest, ignore=shutil.ignore_patterns("replay.json"))
-    print(f"Copia de seguridad en {dest}")
-    print("Las llaves privadas siguen cifradas con tu contraseña. Guárdala en un lugar distinto al de tu equipo.")
+    print(f"Backup saved to {dest}")
+    print("The private keys remain encrypted with your password. Keep the backup somewhere other than this computer.")
 
 
 def do_restore(ws: Workspace, src: Path) -> None:
     src = Path(src)
     if ws.initialized():
-        raise CliError(f"Ya hay una identidad en {ws.home}; no se sobrescribe.")
+        raise CliError(f"There is already an identity in {ws.home}; it is not overwritten.")
     for kind in _KINDS:
         try:
             Keyring.open(src / _KINDS[kind][0])
         except VaultError as exc:
-            raise CliError(f"{src} no parece una copia de seguridad válida.") from exc
+            raise CliError(f"{src} does not look like a valid backup.") from exc
     if ws.home.exists() and any(ws.home.iterdir()):
-        raise CliError(f"{ws.home} no está vacía; no se restaura encima.")
+        raise CliError(f"{ws.home} is not empty; it is not restored on top.")
     shutil.copytree(src, ws.home, dirs_exist_ok=True)
-    print(f"Identidad de '{ws.owner()}' restaurada en {ws.home}. Prueba abrir un archivo para comprobar la contraseña.")
+    print(f"Identity '{ws.owner()}' restored in {ws.home}. Try opening a file to check the password.")
 
 
 # ---------------------------------------------------------------------- #
@@ -733,10 +733,10 @@ def _ask_int(prompt: str, default: Optional[str] = None) -> int:
         answer = _ask(prompt, default)
         if answer.isdigit() and int(answer) >= 1:
             return int(answer)
-        print("Escribe un número entero de 1 en adelante.")
+        print("Type a whole number, 1 or higher.")
 
 
-def _free_target(default: Path, *, what: str = "archivo") -> tuple[Optional[Path], bool]:
+def _free_target(default: Path, *, what: str = "file") -> tuple[Optional[Path], bool]:
     """For the menu: if ``default`` already exists, ask whether to replace it or to use another name.
 
     Returns ``(out, force)`` for the ``do_*`` function. The command-line flags that say the same
@@ -744,35 +744,35 @@ def _free_target(default: Path, *, what: str = "archivo") -> tuple[Optional[Path
     """
     if not (default.exists() or default.is_symlink()):
         return None, False
-    print(f"\nYa existe {default}.")
-    if _confirm(f"¿Reemplazar ese {what}?"):
+    print(f"\n{default} already exists.")
+    if _confirm(f"Replace that {what}?"):
         return None, True
     while True:
-        other = _ask_path(f"Nombre nuevo para el {what}")
+        other = _ask_path(f"New name for the {what}")
         if not (other.exists() or other.is_symlink()):
             return other, False
-        print(f"{other} también existe.")
+        print(f"{other} exists too.")
 
 
 def _confirm(prompt: str, default: bool = False) -> bool:
     while True:
-        answer = input(f"{prompt} [{'S/n' if default else 's/N'}]: ").strip().lower()
+        answer = input(f"{prompt} [{'Y/n' if default else 'y/N'}]: ").strip().lower()
         if not answer:
             return default
-        if answer in {"s", "si", "sí", "y", "yes"}:
+        if answer in {"y", "yes"}:
             return True
         if answer in {"n", "no"}:
             return False
-        print("Responde s (sí) o n (no).")  # a typo must never silently pick the other option
+        print("Answer y (yes) or n (no).")  # a typo must never silently pick the other option
 
 
-def _menu(title: str, options: Sequence[tuple[str, Callable[[], None]]], *, back: str = "Volver") -> None:
+def _menu(title: str, options: Sequence[tuple[str, Callable[[], None]]], *, back: str = "Back") -> None:
     while True:
         print(f"\n== {title} ==")
         for number, (label, _) in enumerate(options, 1):
             print(f"  {number}) {label}")
         print(f"  0) {back}")
-        choice = input("Elige una opción: ").strip()
+        choice = input("Choose an option: ").strip()
         if choice == "0":
             return
         if choice.isdigit() and 1 <= int(choice) <= len(options):
@@ -781,53 +781,53 @@ def _menu(title: str, options: Sequence[tuple[str, Callable[[], None]]], *, back
             except (CliError, VaultError, OSError, ValueError) as exc:
                 print(f"\nError: {_friendly(exc)}")
             except (KeyboardInterrupt, EOFError):
-                print("\nCancelado.")
+                print("\nCancelled.")
         else:
-            print("Opción no válida.")
+            print("Invalid option.")
 
 
 def _pick_kind() -> str:
-    return "sign" if _ask("¿Qué llave? 1) cifrado  2) firma", "1") == "2" else "encrypt"
+    return "sign" if _ask("Which key? 1) encryption  2) signing", "1") == "2" else "encrypt"
 
 
 def _ui_init(ws: Workspace) -> None:
-    print("\nVamos a crear tu identidad: una llave para cifrar y otra para firmar.")
-    do_init(ws, _ask("Tu nombre (sin espacios, ej. alice)"))
+    print("\nLet's create your identity: one key to encrypt and another to sign.")
+    do_init(ws, _ask("Your name (no spaces, e.g. alice)"))
 
 
 def _ui_encrypt(ws: Workspace) -> None:
     ws.require_initialized()
-    src = _ask_path("Archivo a cifrar")
+    src = _ask_path("File to encrypt")
     do_contact_list(ws)
-    raw = _ask("¿Para quién? Nombres de contactos separados por coma (vacío = solo para ti)", "-")
+    raw = _ask("Who is it for? Contact names separated by commas (empty = only for you)", "-")
     to = [] if raw == "-" else [n.strip() for n in raw.split(",") if n.strip()]
-    sign = _confirm("¿Firmarlo para que el destinatario compruebe que es tuyo? (recomendado)", True)
+    sign = _confirm("Sign it so the recipient can check it is yours? (recommended)", True)
     document_id, version = None, None
-    if sign and _confirm("¿Es una versión de un documento que irás actualizando? (protege contra versiones viejas)"):
-        document_id = _ask("Nombre del documento (ej. contrato)")
-        version = _ask_int("Número de versión (1, 2, 3...)", "1")
-    out, force = _free_target(src.with_name(src.name + VAULT_SUFFIX), what="archivo cifrado")
+    if sign and _confirm("Is it a version of a document you will keep updating? (protects against old versions)"):
+        document_id = _ask("Document name (e.g. contract)")
+        version = _ask_int("Version number (1, 2, 3...)", "1")
+    out, force = _free_target(src.with_name(src.name + VAULT_SUFFIX), what="encrypted file")
     do_encrypt(ws, src, to, out, sign=sign, document_id=document_id, version=version, force=force)
 
 
 def _ui_decrypt(ws: Workspace) -> None:
     """Decrypt from the menu. The three overrides of the command line are offered here, one at a time,
     and only after the safe attempt failed for that reason and the user confirms."""
-    src = _ask_path("Archivo .vault a descifrar")
+    src = _ask_path("The .vault file to decrypt")
     options = {"allow_unsigned": False, "replay_check": True, "allow_revoked": False}
     target = _decrypt_target(src)
     if target.exists():
-        print(f"\nYa existe {target}.")
-        if _confirm("¿Reemplazarlo con el archivo descifrado?"):
+        print(f"\n{target} already exists.")
+        if _confirm("Replace it with the decrypted file?"):
             options["force"] = True
         else:
-            options["out"] = _ask_path("Nombre nuevo para el archivo descifrado")
+            options["out"] = _ask_path("New name for the decrypted file")
     questions = {
-        "unsigned": ("Este archivo no está firmado (o le quitaron la firma): no se puede comprobar quién lo creó. "
-                     "¿Abrirlo de todos modos?", "allow_unsigned", True),
-        "replay": ("Este archivo ya fue aceptado antes. ¿Abrirlo otra vez sin la protección contra repetición?",
+        "unsigned": ("This file is not signed (or its signature was removed): it cannot be checked who created it. "
+                     "Open it anyway?", "allow_unsigned", True),
+        "replay": ("This file was already accepted before. Open it again without the replay protection?",
                    "replay_check", False),
-        "revoked": ("Esa llave está revocada. ¿Usarla solo para recuperar archivos viejos?", "allow_revoked", True),
+        "revoked": ("That key is revoked. Use it only to recover old files?", "allow_revoked", True),
     }
     for _ in range(3):
         try:
@@ -848,14 +848,14 @@ def _ui_decrypt(ws: Workspace) -> None:
             raise error
         if not _confirm(question):
             # Not the library's message: it points at command-line flags the menu does not have.
-            print("\nNo se descifró nada.")
+            print("\nNothing was decrypted.")
             return
         options[option] = value
     do_decrypt(ws, src, **options)
 
 
 def _ui_inspect(ws: Workspace) -> None:
-    do_inspect(ws, _ask_path("Archivo .vault a revisar"))
+    do_inspect(ws, _ask_path("The .vault file to look at"))
 
 
 def _ui_keys(ws: Workspace) -> None:
@@ -865,81 +865,81 @@ def _ui_keys(ws: Workspace) -> None:
     def revoke() -> None:
         kind = _pick_kind()
         do_keys(ws)
-        prefix = _ask("Primeros caracteres de la llave a revocar (vacío = la activa)", "-")
+        prefix = _ask("First characters of the key to revoke (empty = the active one)", "-")
         key = _resolve_key(ws.ring(kind), None if prefix == "-" else prefix)  # fail before asking more
-        reason = _ask("Motivo")
-        compromised = _confirm("¿Pudo caer en manos de otra persona?")
-        out, force = _free_target(Path(f"revocacion-{kind}-{key.key_id[:8]}.txt"), what="aviso de revocación")
+        reason = _ask("Reason")
+        compromised = _confirm("Could it have fallen into someone else's hands?")
+        out, force = _free_target(Path(f"revocation-{kind}-{key.key_id[:8]}.txt"), what="revocation notice")
         do_revoke(ws, kind, key.key_id, reason, compromised, out, force)
 
     _menu(
-        "Mis llaves",
+        "My keys",
         [
-            ("Ver mis llaves", lambda: do_keys(ws)),
-            ("Crear llave nueva (rotar)", rotate),
-            ("Revocar una llave", revoke),
+            ("View my keys", lambda: do_keys(ws)),
+            ("Create new key (rotate)", rotate),
+            ("Revoke a key", revoke),
         ],
     )
 
 
 def _ui_share(ws: Workspace) -> None:
     kind = _pick_kind()
-    out, force = _free_target(Path(f"{ws.owner()}-{kind}.pub.pem"), what="archivo de la llave pública")
+    out, force = _free_target(Path(f"{ws.owner()}-{kind}.pub.pem"), what="public key file")
     do_export_public(ws, kind, out, force)
 
 
 def _ui_contacts(ws: Workspace) -> None:
     def add() -> None:
-        name = _ask("Nombre del contacto")
-        pem = _ask_path("Archivo de su llave pública de cifrado (.pem)")
-        fp = _ask("Huella que esa persona te dio por otro canal (obligatoria)")
+        name = _ask("Contact name")
+        pem = _ask_path("Their public encryption key file (.pem)")
+        fp = _ask("Fingerprint that person gave you over another channel (required)")
         force = False
         if (ws.contacts / f"{name}.pem").exists():
-            print(f"\nYa tienes un contacto llamado '{name}'.")
-            if not _confirm("¿Reemplazar su llave por esta? (solo si esa persona cambió de llave)"):
+            print(f"\nYou already have a contact named '{name}'.")
+            if not _confirm("Replace their key with this one? (only if that person changed keys)"):
                 return
             force = True
         do_contact_add(ws, name, pem, fp, force)
 
     _menu(
-        "Contactos (a quién puedo cifrarle)",
+        "Contacts (who I can encrypt for)",
         [
-            ("Ver contactos", lambda: do_contact_list(ws)),
-            ("Agregar contacto", add),
-            ("Eliminar contacto", lambda: do_contact_remove(ws, _ask("Nombre"))),
+            ("View contacts", lambda: do_contact_list(ws)),
+            ("Add contact", add),
+            ("Remove contact", lambda: do_contact_remove(ws, _ask("Name"))),
         ],
     )
 
 
 def _ui_trust(ws: Workspace) -> None:
     def add() -> None:
-        name = _ask("Nombre del firmante")
-        pem = _ask_path("Archivo de su llave pública de firma (.pem)")
-        fp = _ask("Huella de firma que te dio por otro canal (obligatoria)")
+        name = _ask("Signer name")
+        pem = _ask_path("Their public signing key file (.pem)")
+        fp = _ask("Signing fingerprint that person gave you over another channel (required)")
         do_trust_add(ws, name, pem, fp)
 
     def revoke() -> None:
-        do_trust_revoke(ws, _ask("Primeros caracteres del identificador"), _ask("Motivo"))
+        do_trust_revoke(ws, _ask("First characters of the identifier"), _ask("Reason"))
 
     _menu(
-        "Firmantes de confianza",
+        "Trusted signers",
         [
-            ("Ver firmantes", lambda: do_trust_list(ws)),
-            ("Confiar en un firmante nuevo", add),
-            ("Dejar de confiar en un firmante", revoke),
-            ("Importar un aviso de revocación", lambda: do_trust_import(ws, _ask_path("Archivo del aviso"))),
+            ("View signers", lambda: do_trust_list(ws)),
+            ("Trust a new signer", add),
+            ("Stop trusting a signer", revoke),
+            ("Import a revocation notice", lambda: do_trust_import(ws, _ask_path("Notice file"))),
         ],
     )
 
 
 def _ui_backup(ws: Workspace) -> None:
     while True:
-        dest = _ask_path("Carpeta nueva donde guardar la copia")
+        dest = _ask_path("New folder where the backup will be saved")
         if not (dest.exists() or dest.is_symlink()):
             break
-        print(f"{dest} ya existe; escribe un nombre de carpeta que no exista.")
+        print(f"{dest} already exists; type a folder name that does not exist.")
     do_backup(ws, dest)
-    print("Para restaurarla en otro equipo: abre este programa en una carpeta sin identidad, responde que no quieres crear una y elige restaurar.")
+    print("To restore it on another computer: open this program in a folder without an identity, answer that you do not want to create one, and choose restore.")
 
 
 def run_menu(ws: Workspace) -> None:
@@ -952,14 +952,14 @@ def run_menu(ws: Workspace) -> None:
 
 
 def _run_menu(ws: Workspace) -> None:
-    print("=== Bóveda de documentos cifrados ===")
+    print("=== Encrypted document vault ===")
     while not ws.initialized():
-        print(f"\nNo encontré una identidad en {ws.home}.")
-        if not _confirm("¿Crear una ahora?", True):
-            if not _confirm("¿Restaurar una copia de seguridad que ya tienes?"):
+        print(f"\nI did not find an identity in {ws.home}.")
+        if not _confirm("Create one now?", True):
+            if not _confirm("Restore a backup you already have?"):
                 return
             try:
-                do_restore(ws, _ask_path("Carpeta de la copia de seguridad"))
+                do_restore(ws, _ask_path("Backup folder"))
             except (CliError, VaultError, OSError) as exc:
                 print(f"\nError: {_friendly(exc)}")
             continue
@@ -968,18 +968,18 @@ def _run_menu(ws: Workspace) -> None:
         except (CliError, VaultError, OSError) as exc:
             print(f"\nError: {_friendly(exc)}")
     _menu(
-        f"Menú principal ({ws.owner()})",
+        f"Main menu ({ws.owner()})",
         [
-            ("Cifrar un archivo", lambda: _ui_encrypt(ws)),
-            ("Descifrar un archivo", lambda: _ui_decrypt(ws)),
-            ("Ver los datos de un archivo cifrado (sin descifrar)", lambda: _ui_inspect(ws)),
-            ("Mis llaves (ver, rotar, revocar)", lambda: _ui_keys(ws)),
-            ("Compartir mi llave pública", lambda: _ui_share(ws)),
-            ("Contactos (a quién puedo cifrarle)", lambda: _ui_contacts(ws)),
-            ("Firmantes de confianza", lambda: _ui_trust(ws)),
-            ("Copia de seguridad", lambda: _ui_backup(ws)),
+            ("Encrypt a file", lambda: _ui_encrypt(ws)),
+            ("Decrypt a file", lambda: _ui_decrypt(ws)),
+            ("View the details of an encrypted file (without decrypting)", lambda: _ui_inspect(ws)),
+            ("My keys (view, rotate, revoke)", lambda: _ui_keys(ws)),
+            ("Share my public key", lambda: _ui_share(ws)),
+            ("Contacts (who I can encrypt for)", lambda: _ui_contacts(ws)),
+            ("Trusted signers", lambda: _ui_trust(ws)),
+            ("Backup", lambda: _ui_backup(ws)),
         ],
-        back="Salir",
+        back="Exit",
     )
 
 
@@ -992,18 +992,18 @@ def _friendly(exc: BaseException) -> str:
     """Message for the user.  Failures to open a container stay generic on purpose (D3)."""
     if isinstance(exc, UntrustedSignerError):
         return (
-            "El archivo está firmado por alguien en quien no confías (o cuya llave fue revocada). "
-            "Si es quien esperas, agrégalo como firmante de confianza (con su huella)."
+            "The file is signed by someone you do not trust (or whose key was revoked). "
+            "If it is who you expect, add them as a trusted signer (with their fingerprint)."
         )
     if isinstance(exc, ReplayDetectedError):
         return (
-            "Este archivo ya fue aceptado antes (protección contra repetición). "
-            "Si solo perdiste el resultado, usa --no-replay-check."
+            "This file was already accepted before (replay protection). "
+            "If you only lost the result, use --no-replay-check."
         )
     if isinstance(exc, RollbackDetectedError):
-        return "Ya aceptaste una versión igual o más nueva de este documento: esta es una versión vieja."
+        return "You already accepted an equal or newer version of this document: this is an old version."
     if isinstance(exc, KeystoreAccessError):
-        return "Contraseña incorrecta, o las llaves fueron modificadas."
+        return "Wrong password, or the keys were modified."
     if isinstance(exc, OSError):
         return f"{exc.strerror or exc}: {getattr(exc, 'filename', '') or ''}".strip(": ")
     return str(exc)
@@ -1017,83 +1017,83 @@ def _friendly(exc: BaseException) -> str:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m vault",
-        description="Bóveda de documentos cifrados. Sin argumentos abre un menú interactivo.",
+        description="Encrypted document vault. With no arguments it opens an interactive menu.",
     )
-    parser.add_argument("--home", type=Path, help="carpeta de datos (por defecto ~/.vault o $VAULT_HOME)")
-    sub = parser.add_subparsers(dest="command", metavar="comando")
+    parser.add_argument("--home", type=Path, help="data folder (default ~/.vault or $VAULT_HOME)")
+    sub = parser.add_subparsers(dest="command", metavar="command")
 
     def add(name: str, help_text: str) -> argparse.ArgumentParser:
         return sub.add_parser(name, help=help_text, description=help_text)
 
-    kind_arg = lambda p: p.add_argument("kind", choices=list(_KINDS), help="encrypt = llave de cifrado, sign = llave de firma")
+    kind_arg = lambda p: p.add_argument("kind", choices=list(_KINDS), help="encrypt = encryption key, sign = signing key")
 
-    p = add("init", "crea tu identidad (llaves de cifrado y de firma)")
-    p.add_argument("--owner", required=True, help="tu nombre, sin espacios")
-    add("keys", "lista tus llaves y su estado")
-    p = add("export", "guarda tu llave pública para compartirla")
+    p = add("init", "create your identity (encryption and signing keys)")
+    p.add_argument("--owner", required=True, help="your name, without spaces")
+    add("keys", "list your keys and their status")
+    p = add("export", "save your public key so you can share it")
     kind_arg(p)
     p.add_argument("--out", type=Path)
     p.add_argument("--force", action="store_true")
-    p = add("rotate", "crea una llave nueva y conserva la anterior")
+    p = add("rotate", "create a new key and keep the previous one")
     kind_arg(p)
-    p = add("revoke", "revoca una llave y genera el aviso de revocación")
+    p = add("revoke", "revoke a key and generate the revocation notice")
     kind_arg(p)
-    p.add_argument("--key", help="primeros caracteres del identificador (por defecto, la llave activa)")
+    p.add_argument("--key", help="first characters of the identifier (default: the active key)")
     p.add_argument("--reason", required=True)
-    p.add_argument("--compromised", action="store_true", help="la llave pudo caer en manos de otros")
-    p.add_argument("--out", type=Path, help="archivo del aviso de revocación")
+    p.add_argument("--compromised", action="store_true", help="the key may have fallen into other hands")
+    p.add_argument("--out", type=Path, help="revocation notice file")
     p.add_argument("--force", action="store_true")
 
-    contacts = add("contacts", "destinatarios a quienes puedes cifrar").add_subparsers(dest="action", required=True)
-    p = contacts.add_parser("add", help="agrega la llave pública de cifrado de alguien")
+    contacts = add("contacts", "recipients you can encrypt for").add_subparsers(dest="action", required=True)
+    p = contacts.add_parser("add", help="add someone's public encryption key")
     p.add_argument("name")
     p.add_argument("pem", type=Path)
-    p.add_argument("--fingerprint", required=True, help="huella que esa persona te dio por otro canal")
+    p.add_argument("--fingerprint", required=True, help="fingerprint that person gave you over another channel")
     p.add_argument("--force", action="store_true")
-    contacts.add_parser("list", help="lista contactos")
-    p = contacts.add_parser("remove", help="elimina un contacto")
+    contacts.add_parser("list", help="list contacts")
+    p = contacts.add_parser("remove", help="remove a contact")
     p.add_argument("name")
 
-    p = add("encrypt", "cifra un archivo para uno o más contactos")
+    p = add("encrypt", "encrypt a file for one or more contacts")
     p.add_argument("file", type=Path)
-    p.add_argument("--to", default="", help="contactos separados por coma")
-    p.add_argument("--no-self", action="store_true", help="no incluirme como destinatario")
-    p.add_argument("--no-sign", action="store_true", help="no firmar (por defecto siempre se firma)")
-    p.add_argument("--document-id", help="nombre del documento (detecta versiones viejas)")
-    p.add_argument("--version", type=int, help="número de versión del documento")
+    p.add_argument("--to", default="", help="contacts separated by commas")
+    p.add_argument("--no-self", action="store_true", help="do not include me as a recipient")
+    p.add_argument("--no-sign", action="store_true", help="do not sign (by default it is always signed)")
+    p.add_argument("--document-id", help="document name (detects old versions)")
+    p.add_argument("--version", type=int, help="document version number")
     p.add_argument("--out", type=Path)
     p.add_argument("--force", action="store_true")
 
-    p = add("decrypt", "descifra un archivo .vault")
+    p = add("decrypt", "decrypt a .vault file")
     p.add_argument("file", type=Path)
     p.add_argument("--out", type=Path)
     p.add_argument("--force", action="store_true")
-    p.add_argument("--no-replay-check", action="store_true", help="no rechazar archivos ya aceptados antes")
-    p.add_argument("--allow-revoked", action="store_true", help="usar una llave revocada para recuperar archivos viejos")
-    p.add_argument("--allow-unsigned", action="store_true", help="abrir un archivo sin firma (no se comprueba quién lo creó)")
+    p.add_argument("--no-replay-check", action="store_true", help="do not reject files already accepted before")
+    p.add_argument("--allow-revoked", action="store_true", help="use a revoked key to recover old files")
+    p.add_argument("--allow-unsigned", action="store_true", help="open an unsigned file (it is not checked who created it)")
 
-    p = add("inspect", "muestra los datos públicos de un archivo .vault sin descifrarlo")
+    p = add("inspect", "show the public fields of a .vault file without decrypting it")
     p.add_argument("file", type=Path)
 
-    trust = add("trust", "firmantes en los que confías").add_subparsers(dest="action", required=True)
-    p = trust.add_parser("add", help="confía en la llave de firma de alguien")
+    trust = add("trust", "signers you trust").add_subparsers(dest="action", required=True)
+    p = trust.add_parser("add", help="trust someone's signing key")
     p.add_argument("name")
     p.add_argument("pem", type=Path)
-    p.add_argument("--fingerprint", required=True, help="huella de firma recibida por otro canal")
-    p = trust.add_parser("replace", help="cambia la llave de un firmante por una nueva")
-    p.add_argument("old", help="primeros caracteres del identificador anterior")
+    p.add_argument("--fingerprint", required=True, help="signing fingerprint received over another channel")
+    p = trust.add_parser("replace", help="replace a signer's key with a new one")
+    p.add_argument("old", help="first characters of the previous identifier")
     p.add_argument("pem", type=Path)
     p.add_argument("--fingerprint", required=True)
-    trust.add_parser("list", help="lista firmantes")
-    p = trust.add_parser("revoke", help="deja de confiar en un firmante")
+    trust.add_parser("list", help="list signers")
+    p = trust.add_parser("revoke", help="stop trusting a signer")
     p.add_argument("signer")
     p.add_argument("--reason", required=True)
-    p = trust.add_parser("import-revocation", help="importa un aviso de revocación")
+    p = trust.add_parser("import-revocation", help="import a revocation notice")
     p.add_argument("notice", type=Path)
 
-    p = add("backup", "copia tu carpeta (las llaves siguen cifradas)")
+    p = add("backup", "copy your folder (the keys stay encrypted)")
     p.add_argument("dest", type=Path)
-    p = add("restore", "restaura una copia de seguridad")
+    p = add("restore", "restore a backup")
     p.add_argument("src", type=Path)
     return parser
 
@@ -1159,7 +1159,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         else:
             _dispatch(ws, args)
     except (KeyboardInterrupt, EOFError):
-        print("\nCancelado.", file=sys.stderr)
+        print("\nCancelled.", file=sys.stderr)
         return 130
     except (CliError, VaultError, OSError, ValueError) as exc:
         print(f"Error: {_friendly(exc)}", file=sys.stderr)
