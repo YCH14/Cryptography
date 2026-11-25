@@ -22,7 +22,7 @@
 
 ### Only if the PR touches hybrid encryption (D3)
 
-- [ ] Only the DEK is encrypted with the public key (RSA-OAEP-SHA256); the file is always encrypted with AEAD.
+- [ ] Only the DEK is encrypted with the public key (ECIES: ephemeral X25519, HKDF-SHA256, AES-256-GCM); the file is always encrypted with AEAD.
 - [ ] The recipient list, `id`, `fingerprint`, `encrypted_dek` and algorithm identifiers are bound as AAD.
 - [ ] `id` and `fingerprint` occupy disjoint spaces and the entry lookup is deterministic, with no fallback.
 - [ ] Tests cover: 2 recipients, unauthorized user, tampered recipient list, wrong private key and removed recipient.
