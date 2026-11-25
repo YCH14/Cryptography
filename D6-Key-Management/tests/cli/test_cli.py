@@ -58,16 +58,16 @@ def alice_sign_fingerprint(alice: Path) -> str:
 def test_init_creates_keys_and_refuses_second_identity(users, capsys):
     alice, _, _ = users
     assert run(alice, "init", "--owner", "alice") == 1
-    assert "Ya existe" in capsys.readouterr().err
+    assert "already exists" in capsys.readouterr().err
     assert run(alice, "keys") == 0
     out = capsys.readouterr().out
-    assert "active" in out and "cifrado" in out and "firma" in out
+    assert "active" in out and "Encryption keys" in out and "Signing keys" in out
 
 
 def test_init_rejects_short_password(tmp_path, passwords, capsys):
     passwords["value"] = "short"
     assert run(tmp_path / "x", "init", "--owner", "x") == 1
-    assert "al menos" in capsys.readouterr().err
+    assert "at least" in capsys.readouterr().err
     assert not (tmp_path / "x" / "x25519").exists()
 
 
@@ -92,7 +92,7 @@ def test_decrypt_never_overwrites_without_force(users, capsys):
     assert run(alice, "decrypt", str(tmp / "note.txt.vault")) == 1
     assert doc.read_bytes() == b"two"
     assert run(alice, "encrypt", str(doc)) == 1  # the .vault file exists too
-    assert "ya existe" in capsys.readouterr().err
+    assert "already exists" in capsys.readouterr().err
     assert run(alice, "decrypt", str(tmp / "note.txt.vault"), "--force") == 0
     assert doc.read_bytes() == b"one"
 
@@ -105,7 +105,7 @@ def test_wrong_password_is_refused(users, passwords, capsys):
     doc.unlink()
     passwords["value"] = "not the password"
     assert run(alice, "decrypt", str(tmp / "a.txt.vault")) == 1
-    assert "Contraseña incorrecta" in capsys.readouterr().err
+    assert "Wrong password" in capsys.readouterr().err
     assert not doc.exists()
 
 
@@ -136,7 +136,7 @@ def test_signed_file_needs_trusted_signer_then_replay_is_detected(users, capsys)
 
     # Bob does not trust Alice yet.
     assert run(bob, "decrypt", str(tmp / "c.vault"), "--out", str(tmp / "o1.txt")) == 1
-    assert "no confías" in capsys.readouterr().err
+    assert "do not trust" in capsys.readouterr().err
     # A wrong fingerprint is refused; the right one is accepted.
     assert run(bob, "trust", "add", "alice", str(tmp / "alice-sign.pem"), "--fingerprint", "00" * 32) == 1
     fp = alice_sign_fingerprint(alice)
@@ -148,7 +148,7 @@ def test_signed_file_needs_trusted_signer_then_replay_is_detected(users, capsys)
     assert (tmp / "o1.txt").read_bytes() == b"signed content"
     # The same container again is a replay.
     assert run(bob, "decrypt", str(tmp / "c.vault"), "--out", str(tmp / "o2.txt")) == 1
-    assert "ya fue aceptado" in capsys.readouterr().err
+    assert "already accepted" in capsys.readouterr().err
     assert run(bob, "decrypt", str(tmp / "c.vault"), "--out", str(tmp / "o2.txt"), "--no-replay-check") == 0
 
 
@@ -235,7 +235,7 @@ def test_backup_and_restore(users):
 
 def test_commands_need_an_identity(tmp_path, capsys):
     assert run(tmp_path / "empty", "keys") == 1
-    assert "Todavía no hay una identidad" in capsys.readouterr().err
+    assert "There is no identity" in capsys.readouterr().err
 
 
 def test_interactive_menu_encrypts_and_decrypts(users, monkeypatch, capsys):
@@ -262,4 +262,4 @@ def test_menu_survives_errors(users, monkeypatch, capsys):
     typed = iter(["1", str(tmp / "missing.txt"), "-", "n", "0"])
     monkeypatch.setattr("builtins.input", lambda prompt="": next(typed))
     assert run(alice) == 0
-    assert "No encuentro el archivo" in capsys.readouterr().out
+    assert "File not found" in capsys.readouterr().out

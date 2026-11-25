@@ -54,7 +54,7 @@ def test_stripped_signature_is_refused(alice, tmp_path, capsys):
         document.pop(field, None)
     vault.write_bytes(json.dumps(document).encode())
     assert run(alice, "decrypt", str(vault)) == 1
-    assert "no está firmado" in capsys.readouterr().err
+    assert "not signed" in capsys.readouterr().err
     assert not (tmp_path / "note.txt").exists()
 
 
@@ -134,7 +134,7 @@ def test_inspect_shows_public_fields_without_password(alice, tmp_path, capsys, m
     monkeypatch.setattr(getpass, "getpass", boom)
     assert run(alice, "inspect", str(vault)) == 0
     out = capsys.readouterr().out
-    assert "VLT3" in out and "alice" in out and "<- tú" in out and "Firma:          sí" in out
+    assert "VLT3" in out and "alice" in out and "<- you" in out and "Signature:      yes" in out
     assert "secret" not in out and "ciphertext" not in out
 
 
@@ -143,7 +143,7 @@ def test_inspect_works_without_identity_and_marks_unsigned(alice, tmp_path, caps
     capsys.readouterr()
     assert run(tmp_path / "nobody", "inspect", str(vault)) == 0
     out = capsys.readouterr().out
-    assert "NO" in out and "<- tú" not in out
+    assert "NO" in out and "<- you" not in out
 
 
 def test_inspect_refuses_other_files_and_escapes_control_characters(alice, tmp_path, capsys):
@@ -170,7 +170,7 @@ def test_menu_decrypt_offers_to_open_an_unsigned_file(alice, tmp_path, monkeypat
     _menu(monkeypatch, "2", str(vault), "n", "0")
     assert run(alice) == 0
     assert not (tmp_path / "note.txt").exists()
-    assert "No se descifró nada" in capsys.readouterr().out
+    assert "Nothing was decrypted" in capsys.readouterr().out
     _menu(monkeypatch, "2", str(vault), "y", "0")
     assert run(alice) == 0
     assert (tmp_path / "note.txt").read_bytes() == b"secret"
@@ -194,7 +194,7 @@ def test_inspect_shows_creation_time(alice, tmp_path, capsys):
     capsys.readouterr()
     assert run(alice, "inspect", str(vault)) == 0
     out = capsys.readouterr().out
-    assert "Creado:" in out and "UTC" in out
+    assert "Created:" in out and "UTC" in out
 
 
 def test_menu_encrypt_can_label_document_versions(alice, tmp_path, monkeypatch):
@@ -212,14 +212,14 @@ def test_menu_asks_again_for_a_short_or_different_password(tmp_path, monkeypatch
     _menu(monkeypatch, "y", "alice", "0")
     assert run(tmp_path / "new") == 0
     out = capsys.readouterr().out
-    assert "al menos 8" in out and "no coinciden" in out
+    assert "at least 8" in out and "do not match" in out
     assert Workspace(tmp_path / "new").initialized()
 
 
 def test_subcommands_still_fail_at_once_on_a_short_password(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(getpass, "getpass", lambda prompt="": "1234")
     assert run(tmp_path / "x", "init", "--owner", "x") == 1
-    assert "al menos 8" in capsys.readouterr().err
+    assert "at least 8" in capsys.readouterr().err
 
 
 def test_menu_expands_a_tilde_in_typed_paths(alice, tmp_path, monkeypatch):
@@ -299,7 +299,7 @@ def test_menu_version_asks_again_on_a_non_number(alice, tmp_path, monkeypatch):
 def test_menu_confirmation_asks_again_on_a_typo_instead_of_dropping_the_signature(alice, tmp_path, monkeypatch):
     doc = tmp_path / "t.txt"
     doc.write_bytes(b"x")
-    _menu(monkeypatch, "1", str(doc), "-", "s}", "s", "n", "0")  # typo, then yes to signing
+    _menu(monkeypatch, "1", str(doc), "-", "y}", "y", "n", "0")  # typo, then yes to signing
     assert run(alice) == 0
     assert "signature" in json.loads((tmp_path / "t.txt.vault").read_bytes())
 
@@ -313,7 +313,7 @@ def test_menu_declining_an_override_says_nothing_was_decrypted_without_mentionin
     _menu(monkeypatch, "2", str(vault), "n", "0")
     assert run(alice) == 0
     out = capsys.readouterr()
-    assert "No se descifró nada" in out.out
+    assert "Nothing was decrypted" in out.out
     assert "--" not in out.out + out.err
     assert not (tmp_path / "note.txt").exists()
 
@@ -327,7 +327,7 @@ def test_menu_revoke_without_an_active_key_fails_before_asking_more_and_names_me
     monkeypatch.setattr("builtins.input", lambda prompt="": (asked.append(prompt), next(typed))[1])
     assert run(alice) == 0
     out = capsys.readouterr().out
-    assert "Crear llave nueva" in out
+    assert "Create new key" in out
     assert not any("Motivo" in p for p in asked)
 
 
@@ -335,8 +335,8 @@ def test_menu_can_restore_a_backup_into_an_empty_home(alice, tmp_path, monkeypat
     backup = tmp_path / "bk"
     assert run(alice, "backup", str(backup)) == 0
     new_home = tmp_path / "other-computer"
-    _menu(monkeypatch, "n", "s", str(tmp_path / "not-a-backup"), "n", "s", str(backup), "0")
+    _menu(monkeypatch, "n", "y", str(tmp_path / "not-a-backup"), "n", "y", str(backup), "0")
     assert run(new_home) == 0
     out = capsys.readouterr().out
-    assert "no parece una copia de seguridad" in out and "restaurada" in out
+    assert "does not look like a valid backup" in out and "restored" in out
     assert Workspace(new_home).initialized() and Workspace(new_home).owner() == "alice"
