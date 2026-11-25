@@ -99,7 +99,7 @@ restore_keystore(Path("alice-x25519-backup"), Path("alice-x25519-restored"), "a 
 
 ## Command-line interface
 
-Users do not need to write Python: `python -m vault` opens an interactive menu (in Spanish) to create an identity, encrypt and decrypt files, share public keys, manage contacts and trusted signers, rotate or revoke keys and back everything up. The same actions are available as subcommands for scripts. It uses only the standard library on top of the modules above.
+Users do not need to write Python: `python -m vault` opens an interactive menu (in Spanish) to create an identity, encrypt and decrypt files, share public keys, manage contacts and trusted signers, rotate or revoke keys, inspect a file without opening it and back everything up (and restore it on a new computer). The same actions are available as subcommands for scripts. It uses only the standard library on top of the modules above.
 
 ```bash
 # Linux / macOS: creates .venv on the first run
@@ -134,7 +134,7 @@ Notes:
 - `encrypt` signs by default (`--no-sign` to skip it). `decrypt` refuses a file that is not signed, or whose signature was removed, unless you pass `--allow-unsigned`: otherwise anyone could strip the signature and the file would be accepted. Your own signing key is trusted automatically, so you can open what you encrypted. Because the signature is checked with the replay record, decrypting the same file twice needs `--no-replay-check`.
 - `inspect` verifies nothing: it only shows what is written in the file (recipients, signer, document version), so do not trust it as proof of who made the file; `decrypt` does the checks.
 - Files the tool writes (keys, `.vault`, decrypted output) are created readable only by their owner and never through a symbolic link.
-- `decrypt` never overwrites an existing file (use `--force`), opens unsigned files with a warning, and verifies signed files only against trusted signers. A signed container that was already accepted is refused as a replay (`--no-replay-check` to override).
+- `decrypt` never overwrites an existing file (use `--force`), refuses files that are not signed unless `--allow-unsigned` is given, and verifies signed files only against trusted signers. A signed container that was already accepted is refused as a replay (`--no-replay-check` to override).
 - Decryption failures keep the generic message of D3, so the CLI does not reveal whether the key or the file was wrong.
 - Tests: [`tests/cli/`](tests/cli/).
 
